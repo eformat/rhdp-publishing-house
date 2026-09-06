@@ -300,7 +300,7 @@ export function WorkflowDetailPage() {
       setSnackbar({
         open: true,
         severity: 'success',
-        message: `${STAGE_LABELS[rejectingStage]} rejected — returning to ${rejectingStage === 'infra_review' ? 'Content Review' : 'Intake'}...`,
+        message: `${STAGE_LABELS[rejectingStage]} rejected — returning to Intake...`,
       });
       const prevStage = result.summary.stage;
       for (let i = 0; i < 6; i++) {
