@@ -4,7 +4,7 @@ metadata:
   annotations:
     sonataflow.org/description: 4-stage content lifecycle orchestration
     sonataflow.org/profile: preview
-    sonataflow.org/version: "2.0"
+    sonataflow.org/version: "1.8"
   labels:
     app: publishing-house
     component: workflow
@@ -184,8 +184,6 @@ spec:
               rejection: (.rejection + { isRejected: false, reasons: [(.rejection.reasons // [])[] | . + {resolved: true}] }),
               hasDrift: false
             }
-        timeouts:
-          stateExecTimeout: PT168H
         transition:
           nextState: ContentReview
       - name: ContentReview
@@ -225,8 +223,6 @@ spec:
               baselineSha: (if .latestAudit then (if .latestAudit.action == "approved" then .latestAudit.commitSha else .baselineSha end) else .baselineSha end),
               rejection: (if .latestAudit then (if .latestAudit.action == "rejected" then { isRejected: true, reviewerName: .latestAudit.user, reviewerStage: .latestAudit.stage, timestamp: .latestAudit.timestamp, reasons: ((.rejection.reasons // []) + .latestAudit.reasons) } else (.rejection + { isRejected: false, reasons: [(.rejection.reasons // [])[] | . + {resolved: true}] }) end) else { isRejected: false } end)
             }
-        timeouts:
-          stateExecTimeout: PT168H
         transition:
           nextState: ContentReviewDecision
       - name: ContentReviewDecision
@@ -275,8 +271,6 @@ spec:
               baselineSha: (if .latestAudit then (if .latestAudit.action == "approved" then .latestAudit.commitSha else .baselineSha end) else .baselineSha end),
               rejection: (if .latestAudit then (if .latestAudit.action == "rejected" then { isRejected: true, reviewerName: .latestAudit.user, reviewerStage: .latestAudit.stage, timestamp: .latestAudit.timestamp, reasons: ((.rejection.reasons // []) + .latestAudit.reasons) } else (.rejection + { isRejected: false, reasons: [(.rejection.reasons // [])[] | . + {resolved: true}] }) end) else { isRejected: false } end)
             }
-        timeouts:
-          stateExecTimeout: PT168H
         transition:
           nextState: InfraReviewDecision
       - name: InfraReviewDecision
@@ -344,8 +338,6 @@ spec:
               agnosticvUrls: (.latestAudit.agnosticvUrls // .agnosticvUrls // []),
               ciUrls: (.latestAudit.ciUrls // .ciUrls // [])
             }
-        timeouts:
-          stateExecTimeout: PT168H
         transition:
           nextState: JiraSyncEnvSetup
       - name: JiraSyncEnvSetup
@@ -393,8 +385,6 @@ spec:
               rejection: (.rejection + { isRejected: false, reasons: [(.rejection.reasons // [])[] | . + {resolved: true}] }),
               hasDrift: false
             }
-        timeouts:
-          stateExecTimeout: PT168H
         transition:
           nextState: JiraSyncDev
       - name: JiraSyncDev
@@ -440,8 +430,6 @@ spec:
               reviewHistory: ((.reviewHistory // []) + (if .latestAudit then [.latestAudit] else [] end)),
               auditTrailSha: (.latestAudit.commitSha // .auditTrailSha)
             }
-        timeouts:
-          stateExecTimeout: PT168H
         transition:
           nextState: JiraSyncFinal
       - name: JiraSyncFinal
