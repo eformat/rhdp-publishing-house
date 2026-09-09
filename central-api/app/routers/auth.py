@@ -137,6 +137,21 @@ async def exchange_token(
 
     cached = get_cached_token(email)
     if cached is not None:
+        # If cached token has no groups, ALWAYS fetch fresh from Backstage
+        # (don't trust cached empty groups - user might have been added to groups)
+        if cached.groups_bitmask == 0:
+            logger.warning("cached token for %s has no groups, fetching fresh from catalog", email)
+            revoke_token(email)
+            fresh_mask = lookup_user_groups(email)
+            token = create_signed_key(email, fresh_mask)
+            cache_token(email, token, fresh_mask, "exchange")
+            logger.info("regenerated token for %s: mask=%d", email, fresh_mask)
+            return ExchangeResponse(
+                token=token, email=email,
+                groups_bitmask=fresh_mask,
+                expires_at=_token_expiry_iso(token),
+            )
+
         audit.info(json.dumps({
             "audit": "token_cached_hit", "email": email,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -214,6 +229,17 @@ async def anonymous_key(
 
     cached = get_cached_token(email)
     if cached is not None:
+        # If cached token has no groups, ALWAYS fetch fresh from Backstage
+        # (don't trust cached empty groups - user might have been added to groups)
+        if cached.groups_bitmask == 0:
+            logger.warning("cached workspace token for %s has no groups, fetching fresh from catalog", email)
+            revoke_token(email)
+            fresh_mask = lookup_user_groups(email)
+            signed = create_signed_key(email, fresh_mask)
+            cache_token(email, signed, fresh_mask, "anonymous")
+            logger.info("regenerated workspace token for %s: mask=%d", email, fresh_mask)
+            return WorkspaceResponse(api_key=signed, user_email=email)
+
         audit.info(json.dumps({
             "audit": "token_cached_hit", "email": email,
             "timestamp": datetime.now(timezone.utc).isoformat(),
