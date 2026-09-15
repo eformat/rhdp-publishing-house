@@ -7,6 +7,7 @@ import re
 import ssl
 import urllib.parse
 import urllib.request
+import uuid
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
@@ -27,16 +28,26 @@ _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 
 class CreateEpicRequest(BaseModel):
-    project_name: str
-    content_type: str = ""
-    deployment_mode: str = ""
-    project_description: str = ""
-    showroom_type: str = ""
+    epic_type: str  # "rhdp_published" | "field_source"
+    fields: dict    # All template fields as key-value pairs
 
 
 class CreateEpicResponse(BaseModel):
     epic_key: str
     jira_url: str
+    proforma_form_id: str = ""
+
+
+class UpdateEpicRequest(BaseModel):
+    epic_key: str
+    epic_type: str
+    proforma_form_id: str = ""
+    fields: dict = {}  # Fallback if no ProForma
+
+
+class UpdateEpicResponse(BaseModel):
+    epic_key: str
+    updated: bool
 
 
 
@@ -49,49 +60,404 @@ def _jira_headers(settings: Settings) -> dict:
     }
 
 
+def _send_cloud_event(event_type: str, project_slug: str, data: dict, settings: Settings):
+    """Send a CloudEvent to SonataFlow."""
+    cloud_event = {
+        "specversion": "1.0",
+        "type": event_type,
+        "source": "publishing-house",
+        "id": str(uuid.uuid4()),
+        "kogitobusinesskey": project_slug,
+        "projectid": project_slug,
+        "datacontenttype": "application/json",
+        "data": data,
+    }
+    payload = json.dumps(cloud_event).encode()
+    req = urllib.request.Request(
+        f"{settings.sonataflow_url.rstrip('/')}",
+        data=payload,
+        headers={"Content-Type": "application/cloudevents+json"},
+    )
+    try:
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=30) as r:
+            pass
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")
+        logger.warning("cloud event %s for %s returned %s: %s", event_type, project_slug, e.code, body[:500])
+    except Exception as e:
+        logger.warning("cloud event %s send error for %s: %s", event_type, project_slug, e)
+    logger.info("sent %s for %s", event_type, project_slug)
+
+
+# ── ADF Builder Helpers ─────────────────────────────────────────────────────
+
+def _build_adf_heading(level: int, text: str) -> dict:
+    """Build ADF heading node."""
+    return {
+        "type": "heading",
+        "attrs": {"level": level},
+        "content": [{"type": "text", "text": text}]
+    }
+
+
+def _build_adf_paragraph(content: list[dict]) -> dict:
+    """Build ADF paragraph node from content list."""
+    return {
+        "type": "paragraph",
+        "content": content
+    }
+
+
+def _build_adf_text(text: str, strong: bool = False, em: bool = False) -> dict:
+    """Build ADF text node."""
+    marks = []
+    if strong:
+        marks.append({"type": "strong"})
+    if em:
+        marks.append({"type": "em"})
+    node = {"type": "text", "text": text}
+    if marks:
+        node["marks"] = marks
+    return node
+
+
+def _build_adf_bullet_list(items: list[str]) -> dict:
+    """Build ADF bullet list."""
+    return {
+        "type": "bulletList",
+        "content": [
+            {
+                "type": "listItem",
+                "content": [{
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": item}]
+                }]
+            }
+            for item in items
+        ]
+    }
+
+
+def _build_adf_rule() -> dict:
+    """Build ADF horizontal rule."""
+    return {"type": "rule"}
+
+
+# ── Epic Description Formatters ─────────────────────────────────────────────
+
+def _format_onboarded_epic(fields: dict) -> tuple[str, dict]:
+    """Build onboarded epic summary and ADF description."""
+    asset_title = fields.get("assetTitle", fields.get("projectId", "Untitled"))
+
+    # Epic summary
+    summary = f"[PH] {asset_title}"
+
+    # Build ADF content
+    content = [
+        _build_adf_heading(1, asset_title),
+        _build_adf_heading(2, "Overview"),
+        _build_adf_paragraph([_build_adf_text(fields.get("projectDescription", ""))]),
+        _build_adf_heading(2, "Content Plan"),
+        _build_adf_paragraph([
+            _build_adf_text("Type: ", strong=True),
+            _build_adf_text(fields.get("contentType", "lab")),
+            {"type": "hardBreak"},
+            _build_adf_text("Showroom Type: ", strong=True),
+            _build_adf_text(fields.get("showroomType", "classic"))
+        ]),
+    ]
+
+    # Content Outline
+    if fields.get("contentOutline"):
+        content.extend([
+            _build_adf_heading(3, "Content Outline"),
+            _build_adf_paragraph([_build_adf_text(fields["contentOutline"])])
+        ])
+
+    # Learning Objectives
+    if fields.get("learningObjectives"):
+        content.extend([
+            _build_adf_heading(3, "Learning Objectives"),
+            _build_adf_paragraph([_build_adf_text(fields["learningObjectives"])])
+        ])
+
+    # Environment Requirements
+    content.append(_build_adf_heading(2, "Environment Requirements"))
+    env_lines = [
+        _build_adf_text("Platform: ", strong=True),
+        _build_adf_text("OpenShift"),
+        {"type": "hardBreak"},
+        _build_adf_text("Cloud Provider: ", strong=True),
+        _build_adf_text(fields.get("cloudProvider", "cnv")),
+        {"type": "hardBreak"},
+        _build_adf_text("Cluster Type: ", strong=True),
+        _build_adf_text(fields.get("clusterType", "sno")),
+        {"type": "hardBreak"},
+        _build_adf_text("OCP Version: ", strong=True),
+        _build_adf_text(fields.get("ocpVersion", "4.21"))
+    ]
+    content.append(_build_adf_paragraph(env_lines))
+
+    # Business Context
+    content.append(_build_adf_heading(2, "Business Context"))
+    biz_lines = [
+        _build_adf_text("Sales Play / TDP: ", strong=True),
+        _build_adf_text(fields.get("salesPlayTdp", "N/A")),
+        {"type": "hardBreak"},
+        _build_adf_text("Associated Opportunities: ", strong=True),
+        _build_adf_text(fields.get("associatedOpportunities", "N/A"))
+    ]
+    content.append(_build_adf_paragraph(biz_lines))
+
+    # Team
+    content.append(_build_adf_heading(2, "Team"))
+    content.append(_build_adf_paragraph([
+        _build_adf_text("Owner: ", strong=True),
+        _build_adf_text(fields.get("ssoEmail", ""))
+    ]))
+
+    team_members = fields.get("teamMembers", [])
+    if team_members:
+        content.append(_build_adf_paragraph([_build_adf_text("Collaborators:", strong=True)]))
+        collab_items = [f"{m.get('user', '')} ({m.get('email', '')})" for m in team_members]
+        content.append(_build_adf_bullet_list(collab_items))
+
+    # Technical Details
+    ai_req = "None"
+    if fields.get("aiRelated"):
+        if fields.get("gpuNeeded"):
+            ai_req = "GPU"
+        elif fields.get("maasInstead"):
+            ai_req = "MaaS"
+        else:
+            ai_req = "AI (unspecified)"
+
+    content.append(_build_adf_heading(2, "Technical Details"))
+    tech_lines = [
+        _build_adf_text("Automation Type: ", strong=True),
+        _build_adf_text(fields.get("automationType", "ansible")),
+        {"type": "hardBreak"},
+        _build_adf_text("AI Requirements: ", strong=True),
+        _build_adf_text(ai_req),
+        {"type": "hardBreak"},
+        _build_adf_text("Initiative: ", strong=True),
+        _build_adf_text(fields.get("initiativeKey", "rh1_2027")),
+        {"type": "hardBreak"},
+        _build_adf_text("Tags: ", strong=True),
+        _build_adf_text(", ".join(fields.get("tags", [])) if fields.get("tags") else "None")
+    ]
+    content.append(_build_adf_paragraph(tech_lines))
+
+    # Footer
+    content.append(_build_adf_rule())
+    content.append(_build_adf_paragraph([
+        _build_adf_text("Created via Publishing House Template", em=True)
+    ]))
+
+    description = {
+        "type": "doc",
+        "version": 1,
+        "content": content
+    }
+
+    return summary, description
+
+
+def _format_field_source_epic(fields: dict) -> tuple[str, dict]:
+    """Build field source epic summary and ADF description."""
+    asset_title = fields.get("assetTitle", fields.get("projectId", "Untitled"))
+
+    summary = f"[PH] {asset_title} — Field Source"
+
+    content = [
+        _build_adf_paragraph([_build_adf_text("🏷️ Field Source Content", strong=True)]),
+        _build_adf_heading(1, asset_title),
+        _build_adf_heading(2, "Overview"),
+        _build_adf_paragraph([_build_adf_text(fields.get("description", fields.get("projectDescription", "")))]),
+        _build_adf_heading(2, "Content Plan"),
+        _build_adf_paragraph([
+            _build_adf_text("Type: ", strong=True),
+            _build_adf_text(fields.get("contentType", "lab"))
+        ]),
+    ]
+
+    if fields.get("contentOutline"):
+        content.extend([
+            _build_adf_heading(3, "Content Outline"),
+            _build_adf_paragraph([_build_adf_text(fields["contentOutline"])])
+        ])
+
+    if fields.get("learningObjectives"):
+        content.extend([
+            _build_adf_heading(3, "Learning Objectives"),
+            _build_adf_paragraph([_build_adf_text(fields["learningObjectives"])])
+        ])
+
+    # Environment Configuration
+    content.append(_build_adf_heading(2, "Environment Configuration"))
+    env_lines = [
+        _build_adf_text("Cloud Provider: ", strong=True),
+        _build_adf_text(fields.get("cloudProvider", "cnv"))
+    ]
+
+    if fields.get("cloudProvider") != "cnv" and fields.get("cloudProviderJustification"):
+        env_lines.extend([
+            {"type": "hardBreak"},
+            _build_adf_text("Justification: ", strong=True),
+            _build_adf_text(fields["cloudProviderJustification"])
+        ])
+
+    env_lines.extend([
+        {"type": "hardBreak"},
+        _build_adf_text("Cluster Type: ", strong=True),
+        _build_adf_text(fields.get("clusterType", "sno")),
+        {"type": "hardBreak"},
+        _build_adf_text("OCP Version: ", strong=True),
+        _build_adf_text(fields.get("ocpVersion", "4.21"))
+    ])
+
+    if fields.get("clusterType") == "multinode":
+        worker_count = fields.get("workerCount", 2)
+        worker_cpu = fields.get("workerCpu", 16)
+        worker_ram = fields.get("workerMemoryGb", 64)
+        env_lines.extend([
+            {"type": "hardBreak"},
+            _build_adf_text("Workers: ", strong=True),
+            _build_adf_text(f"{worker_count} x {worker_cpu} vCPU, {worker_ram} GB RAM")
+        ])
+
+    content.append(_build_adf_paragraph(env_lines))
+
+    # Base Workloads
+    if fields.get("baseWorkloads"):
+        content.append(_build_adf_paragraph([_build_adf_text("Base Workloads:", strong=True)]))
+        content.append(_build_adf_bullet_list(fields["baseWorkloads"]))
+
+    # Multi-user
+    if fields.get("multiUser"):
+        content.append(_build_adf_paragraph([
+            _build_adf_text("Multi-User: ", strong=True),
+            _build_adf_text(f"Yes ({fields.get('userCount', 1)} users)")
+        ]))
+
+    # Business Context
+    if fields.get("salesPlayTdp"):
+        content.append(_build_adf_heading(2, "Business Context"))
+        content.append(_build_adf_paragraph([
+            _build_adf_text("Sales Play / TDP: ", strong=True),
+            _build_adf_text(fields["salesPlayTdp"])
+        ]))
+
+    # Team
+    content.append(_build_adf_heading(2, "Team"))
+    content.append(_build_adf_paragraph([
+        _build_adf_text("Owner: ", strong=True),
+        _build_adf_text(fields.get("ssoEmail", ""))
+    ]))
+
+    team_members = fields.get("teamMembers", [])
+    if team_members:
+        content.append(_build_adf_paragraph([_build_adf_text("Collaborators:", strong=True)]))
+        collab_items = [f"{m.get('user', '')} ({m.get('email', '')})" for m in team_members]
+        content.append(_build_adf_bullet_list(collab_items))
+
+    # Automation
+    content.append(_build_adf_heading(2, "Automation"))
+    auto_lines = [
+        _build_adf_text("Automation Location: ", strong=True),
+        _build_adf_text("PH Monorepo" if fields.get("automationLocation") == "ph_repo" else "External Repo")
+    ]
+
+    if fields.get("automationLocation") == "existing_repo" and fields.get("existingRepoUrl"):
+        auto_lines.extend([
+            {"type": "hardBreak"},
+            _build_adf_text("Repo URL: ", strong=True),
+            _build_adf_text(fields["existingRepoUrl"])
+        ])
+
+    auto_lines.extend([
+        {"type": "hardBreak"},
+        _build_adf_text("Tags: ", strong=True),
+        _build_adf_text(", ".join(fields.get("tags", [])) if fields.get("tags") else "None")
+    ])
+
+    content.append(_build_adf_paragraph(auto_lines))
+
+    # Footer
+    content.append(_build_adf_rule())
+    content.append(_build_adf_paragraph([
+        _build_adf_text("Field Source — Created via Publishing House Template", em=True)
+    ]))
+
+    description = {
+        "type": "doc",
+        "version": 1,
+        "content": content
+    }
+
+    return summary, description
+
+
+# ── ProForma Form Creation ──────────────────────────────────────────────────
+
+def _create_proforma_form(epic_key: str, epic_type: str, fields: dict, settings: Settings) -> str:
+    """Create ProForma form on epic. Returns form_id or empty string on failure."""
+    # ProForma API is not implemented in this iteration - placeholder for future
+    # When implemented, this will:
+    # 1. Build form template based on epic_type
+    # 2. Map fields to form answers
+    # 3. POST to /rest/api/1/form/{epic_key}
+    # 4. Return form_id from response
+    logger.info("ProForma form creation not yet implemented for epic %s", epic_key)
+    return ""
+
+
 @router.post("/epic", response_model=CreateEpicResponse, status_code=201)
 def create_epic(
     body: CreateEpicRequest,
     _caller: str = Depends(_require_auth),
     settings: Settings = Depends(get_settings),
 ):
-    """Create a minimal Jira epic for a new publishing house project.
-    Called by SonataFlow during the CreateEpic state — no description yet,
-    just a placeholder that gets updated after intake."""
+    """Create Jira epic with rich description and optional ProForma form.
+    Called by SonataFlow during the CreateEpic state with all template fields."""
     if not settings.jira_url:
         raise HTTPException(status_code=503, detail="Jira not configured")
 
-    labels = ["publishing-house"]
-    if body.content_type:
-        labels.append(body.content_type)
+    # Format epic summary and description based on type
+    if body.epic_type in ("rhdp_published", "onboarded"):
+        summary, description_adf = _format_onboarded_epic(body.fields)
+        labels = ["publishing-house", "ph-onboarded"]
+    elif body.epic_type == "field_source":
+        summary, description_adf = _format_field_source_epic(body.fields)
+        labels = ["publishing-house", "ph-field-source"]
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown epic_type: {body.epic_type}")
 
+    # Add content type label
+    if body.fields.get("contentType"):
+        labels.append(body.fields["contentType"])
+
+    # Lookup assignee
     assignee = None
     if settings.jira_default_assignee:
         jira_user = _lookup_jira_account_id(settings.jira_default_assignee, settings)
         if jira_user and jira_user["accountId"]:
             assignee = {"accountId": jira_user["accountId"]}
 
-    fields: dict = {
+    # Build Jira issue fields
+    jira_fields: dict = {
         "project": {"key": settings.jira_project_key},
-        "summary": f"[PH] {body.project_name}",
+        "summary": summary,
         "issuetype": {"name": "Epic"},
         "labels": labels,
         "assignee": assignee,
+        "description": description_adf,
     }
-    if body.project_description:
-        fields["description"] = {
-            "type": "doc",
-            "version": 1,
-            "content": [
-                {"type": "paragraph", "content": [
-                    {"type": "text", "text": body.project_description},
-                ]},
-            ],
-        }
 
+    # Create epic
     req = urllib.request.Request(
         f"{settings.jira_url}/rest/api/3/issue",
-        data=json.dumps({"fields": fields}).encode(),
+        data=json.dumps({"fields": jira_fields}).encode(),
         headers=_jira_headers(settings),
         method="POST",
     )
@@ -163,7 +529,7 @@ def create_epic(
     except Exception as e:
         logger.warning("jira: Testing task creation failed for epic %s: %s", epic_key, e)
 
-    if body.showroom_type != "zero_touch":
+    if body.fields.get("showroomType") != "zero_touch":
         dev_ci_fields = {
             "project": {"key": settings.jira_project_key},
             "summary": "[PH] Development CI",
@@ -201,10 +567,97 @@ def create_epic(
             points=POINTS.get(ft["id"]),
         )
 
-    jira_url = f"{settings.jira_url}/browse/{epic_key}"
-    logger.info("jira: created epic %s for project %s", epic_key, body.project_name)
-    return CreateEpicResponse(epic_key=epic_key, jira_url=jira_url)
+    # Try to create ProForma form (placeholder - not yet implemented)
+    proforma_form_id = ""
+    try:
+        proforma_form_id = _create_proforma_form(epic_key, body.epic_type, body.fields, settings)
+    except Exception as e:
+        logger.warning("jira: ProForma form creation failed for epic %s: %s", epic_key, e)
 
+    jira_url = f"{settings.jira_url}/browse/{epic_key}"
+    project_id = body.fields.get("projectId", "unknown")
+    logger.info("jira: created epic %s for project %s", epic_key, project_id)
+
+    # Send ph.epic.created CloudEvent to SonataFlow
+    _send_cloud_event(
+        "ph.epic.created",
+        project_id,
+        {
+            "epic_key": epic_key,
+            "jira_url": jira_url,
+            "proforma_form_id": proforma_form_id
+        },
+        settings
+    )
+
+    return CreateEpicResponse(
+        epic_key=epic_key,
+        jira_url=jira_url,
+        proforma_form_id=proforma_form_id
+    )
+
+
+
+@router.post("/epic/update", response_model=UpdateEpicResponse)
+def update_epic(
+    body: UpdateEpicRequest,
+    _caller: str = Depends(_require_auth),
+    settings: Settings = Depends(get_settings),
+):
+    """Update Jira epic description after pre-intake approval.
+    Reads ProForma form if available, otherwise uses workflow fields."""
+    if not settings.jira_url:
+        raise HTTPException(status_code=503, detail="Jira not configured")
+
+    # Get final field values (from ProForma or workflow)
+    if body.proforma_form_id:
+        # TODO: Read ProForma form data when implemented
+        # For now, fallback to workflow fields
+        logger.info("jira: ProForma read not implemented, using workflow fields for epic %s", body.epic_key)
+        final_fields = body.fields
+    else:
+        final_fields = body.fields
+
+    # Rebuild epic description with final values
+    if body.epic_type in ("rhdp_published", "onboarded"):
+        summary, description_adf = _format_onboarded_epic(final_fields)
+    elif body.epic_type == "field_source":
+        summary, description_adf = _format_field_source_epic(final_fields)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown epic_type: {body.epic_type}")
+
+    # Update epic
+    update_fields = {
+        "summary": summary,
+        "description": description_adf
+    }
+
+    req = urllib.request.Request(
+        f"{settings.jira_url}/rest/api/3/issue/{body.epic_key}",
+        data=json.dumps({"fields": update_fields}).encode(),
+        headers=_jira_headers(settings),
+        method="PUT",
+    )
+
+    try:
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=15):
+            logger.info("jira: updated epic %s after pre-intake approval", body.epic_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Jira epic update failed: {e}")
+
+    # Send ph.epic.updated CloudEvent to SonataFlow
+    project_id = final_fields.get("projectId", "unknown")
+    _send_cloud_event(
+        "ph.epic.updated",
+        project_id,
+        {
+            "epic_key": body.epic_key,
+            "updated": True
+        },
+        settings
+    )
+
+    return UpdateEpicResponse(epic_key=body.epic_key, updated=True)
 
 
 def _lookup_jira_account_id(email: str, settings: Settings) -> dict | None:

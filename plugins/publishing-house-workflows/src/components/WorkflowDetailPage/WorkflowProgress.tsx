@@ -75,9 +75,15 @@ function getNodeState(
   currentStage: WorkflowStage,
   hasDrift?: boolean,
   envSetupSkipped?: boolean,
+  preIntakeUpdateSkipped?: boolean,
 ): NodeState {
   if (currentStage === 'error') return 'error';
   if (s === 'env_setup' && envSetupSkipped) return 'skipped';
+
+  // PreIntakeUpdate is skipped initially (workflow goes straight to PreIntakeReview)
+  // It only becomes active after first sendback
+  if (s === 'pre_intake_update' && preIntakeUpdateSkipped) return 'skipped';
+
   if (currentStage === 'published') return 'completed';
 
   const cur = stageIndex(currentStage);
@@ -95,16 +101,17 @@ interface WorkflowProgressProps {
   rejectedFrom?: WorkflowStage | null;
   hasDrift?: boolean;
   envSetupSkipped?: boolean;
+  preIntakeUpdateSkipped?: boolean;
 }
 
-export function WorkflowProgress({ stage, hasDrift, envSetupSkipped }: WorkflowProgressProps) {
+export function WorkflowProgress({ stage, hasDrift, envSetupSkipped, preIntakeUpdateSkipped }: WorkflowProgressProps) {
   const classes = useStyles();
 
   return (
     <div className={classes.root}>
       <div className={classes.pipeline}>
         {STAGE_ORDER.map((s, i) => {
-          const st = getNodeState(s, stage, hasDrift, envSetupSkipped);
+          const st = getNodeState(s, stage, hasDrift, envSetupSkipped, preIntakeUpdateSkipped);
           return (
             <React.Fragment key={s}>
               <div className={classes.node}>

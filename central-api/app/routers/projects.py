@@ -41,6 +41,85 @@ class IntakeResponse(BaseModel):
     validation: Optional[dict] = None
 
 
+class PreIntakeRequest(BaseModel):
+    action: str  # "approved" | "sendback" | "rejected"
+    notes: str = ""
+
+
+class PreIntakeResponse(BaseModel):
+    status: str
+    project_id: str
+    action: str
+
+
+class PreIntakeUpdateRequest(BaseModel):
+    """Pre-intake update fields - all optional since not all may be updated."""
+    assetTitle: str = None
+    projectDescription: str = None
+    contentOutline: str = None
+    learningObjectives: str = None
+    contentType: str = None
+    associatedOpportunities: str = None
+    salesPlayTdp: str = None
+    aiRelated: bool = None
+    gpuNeeded: bool = None
+    maasInstead: bool = None
+    partnersAccess: bool = None
+    cloudProvider: str = None
+    clusterType: str = None
+    ocpVersion: str = None
+    automationType: str = None
+    showroomType: str = None
+    initiativeKey: str = None
+    tags: list[str] = None
+
+
+class CreateRepoRequest(BaseModel):
+    project_id: str
+    repo_owner: str = "rhpds"
+    template_repo: str = "https://github.com/rhpds/rhdp-publishing-house-template"
+    collaborators: list[dict] = []
+
+
+class CreateRepoResponse(BaseModel):
+    repo_url: str
+    commit_hash: str
+
+
+class StartWorkflowRequest(BaseModel):
+    projectId: str
+    deploymentMode: str = "rhdp_published"
+    ssoUser: str
+    ssoEmail: str
+    assetTitle: str
+    projectDescription: str
+    contentOutline: str
+    learningObjectives: str = ""
+    contentType: str = "lab"
+    associatedOpportunities: str = ""
+    salesPlayTdp: str = ""
+    aiRelated: bool = False
+    gpuNeeded: bool = False
+    maasInstead: bool = False
+    partnersAccess: bool = False
+    cloudProvider: str = "cnv"
+    clusterType: str = "sno"
+    ocpVersion: str = "4.21"
+    automationType: str = "ansible"
+    showroomType: str = "classic"
+    initiativeKey: str = "rh1_2027"
+    teamMembers: list[dict] = []
+    tags: list[str] = []
+    intakeType: str = "new"
+
+
+class StartWorkflowResponse(BaseModel):
+    workflow_id: str
+    project_id: str
+    jira_url: str = ""
+    status: str
+
+
 class DevelopmentRequest(BaseModel):
     repo_url: str
     branch: str = "main"
@@ -371,6 +450,78 @@ def _check_github_write_access(repo_url: str, github_user: str | None) -> None:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to verify GitHub permissions: {e}",
         )
+
+
+# ── Start Workflow ──────────────────────────────────────────────────────────
+
+@router.post("/{project_name}/start", response_model=StartWorkflowResponse, status_code=201)
+async def start_workflow(
+    project_name: str,
+    body: StartWorkflowRequest,
+    _caller: str = Depends(_require_auth),
+):
+    """Start a new Publishing House workflow from template submission.
+    Creates SonataFlow workflow instance with all onboarding fields."""
+    settings = get_settings()
+
+    # Generate workflow ID
+    workflow_id = f"ph_{project_name}_{uuid.uuid4().hex[:8]}"
+
+    # Build workflow input data from all template fields
+    workflow_data = {
+        "projectId": body.projectId,
+        "deploymentMode": body.deploymentMode,
+        "ssoUser": body.ssoUser,
+        "ssoEmail": body.ssoEmail,
+        "assetTitle": body.assetTitle,
+        "projectDescription": body.projectDescription,
+        "contentOutline": body.contentOutline,
+        "learningObjectives": body.learningObjectives,
+        "contentType": body.contentType,
+        "associatedOpportunities": body.associatedOpportunities,
+        "salesPlayTdp": body.salesPlayTdp,
+        "aiRelated": body.aiRelated,
+        "gpuNeeded": body.gpuNeeded,
+        "maasInstead": body.maasInstead,
+        "partnersAccess": body.partnersAccess,
+        "cloudProvider": body.cloudProvider,
+        "clusterType": body.clusterType,
+        "ocpVersion": body.ocpVersion,
+        "automationType": body.automationType,
+        "showroomType": body.showroomType,
+        "initiativeKey": body.initiativeKey,
+        "teamMembers": body.teamMembers,
+        "tags": body.tags,
+        "intakeType": body.intakeType,
+        "workflow_id": workflow_id,
+    }
+
+    # Start SonataFlow workflow instance
+    workflow_url = f"{settings.sonataflow_url.rstrip('/')}/publishinghouseworkflow"
+    headers = {"Content-Type": "application/json"}
+
+    req = urllib.request.Request(
+        workflow_url,
+        data=json.dumps(workflow_data).encode(),
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=30) as r:
+            response_data = json.loads(r.read().decode())
+            logger.info("workflow: started instance %s for project %s", workflow_id, project_name)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to start workflow: {e}")
+
+    # Epic will be created by workflow CreateEpic state (async)
+    # For now, return empty jira_url - workflow will populate it
+    return StartWorkflowResponse(
+        workflow_id=workflow_id,
+        project_id=project_name,
+        jira_url="",
+        status="started"
+    )
 
 
 @router.post("/intake/{project_slug}", response_model=IntakeResponse)
@@ -784,6 +935,218 @@ def _send_cloud_event(event_type: str, project_slug: str, data: dict):
     except Exception as e:
         logger.warning("cloud event %s send error for %s: %s", event_type, project_slug, e)
     logger.info("sent %s for %s", event_type, project_slug)
+
+
+# ── Pre-Intake Review ──────────────────────────────────────────────────────
+
+@router.post("/{slug}/preintake")
+async def preintake_review(
+    slug: str,
+    body: PreIntakeRequest,
+    auth: tuple[str, int] = Depends(_require_auth),
+):
+    """Handle pre-intake review actions: approve, sendback, or reject."""
+    owner, groups = auth
+    # Require pre-intake reviewer or admin permissions
+    _require_group(
+        groups,
+        GROUP_BITS.get("rhdp-preintake-review", GROUP_BITS["rhdp-administrators"]) | GROUP_BITS["rhdp-administrators"],
+        "rhdp-preintake-review or rhdp-administrators"
+    )
+
+    wd = _get_workflow_data(slug)
+    wf_uuid = wd.get("workflow_id", "")
+    if not wf_uuid:
+        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+
+    _require_stage(wf_uuid, ["preintake_review"])
+
+    settings = get_settings()
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Validate action
+    if body.action not in ("approved", "sendback", "rejected"):
+        raise HTTPException(status_code=400, detail=f"Invalid action: {body.action}")
+
+    # Build event data
+    event_data = {
+        "user": owner,
+        "stage": "preintake_review",
+        "action": body.action,
+        "timestamp": timestamp,
+    }
+
+    if body.notes:
+        event_data["notes"] = body.notes
+
+    # Send appropriate CloudEvent
+    event_type_map = {
+        "approved": "ph.preintake.approved",
+        "sendback": "ph.preintake.sendback",
+        "rejected": "ph.preintake.rejected",
+    }
+    event_type = event_type_map[body.action]
+
+    _send_cloud_event(event_type, slug, event_data)
+
+    logger.info("pre-intake %s by %s for %s", body.action, owner, slug)
+
+    return PreIntakeResponse(
+        status="success",
+        project_id=slug,
+        action=body.action
+    )
+
+
+@router.post("/{slug}/preintake/update")
+async def submit_preintake_update(
+    slug: str,
+    body: PreIntakeUpdateRequest,
+    auth: tuple[str, int] = Depends(_require_auth),
+):
+    """Submit updated pre-intake fields after sendback.
+    Available to the project owner (developer) to make corrections."""
+    owner, groups = auth
+
+    wd = _get_workflow_data(slug)
+    wf_uuid = wd.get("workflow_id", "")
+    if not wf_uuid:
+        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+
+    _require_stage(wf_uuid, ["preintake_update"])
+
+    # Build updated fields dict (only include non-None values)
+    updated_fields = {k: v for k, v in body.dict().items() if v is not None}
+
+    if not updated_fields:
+        raise HTTPException(status_code=400, detail="No fields provided to update")
+
+    settings = get_settings()
+    timestamp = datetime.now(timezone.utc).isoformat()
+
+    # Send update submitted event with updated fields
+    event_data = {
+        "user": owner,
+        "timestamp": timestamp,
+        "updated_fields": updated_fields,
+    }
+
+    _send_cloud_event("ph.preintake.update.submitted", slug, event_data)
+
+    logger.info("pre-intake update submitted by %s for %s with %d fields", owner, slug, len(updated_fields))
+
+    return PreIntakeResponse(
+        status="success",
+        project_id=slug,
+        action="update_submitted"
+    )
+
+
+# ── Repository Creation ─────────────────────────────────────────────────────
+
+@router.post("/create-repo", response_model=CreateRepoResponse)
+async def create_repo(
+    body: CreateRepoRequest,
+    _caller: str = Depends(_require_auth),
+):
+    """Create GitHub repo from template and add collaborators.
+    Called by SonataFlow CreateRepo state after pre-intake approval."""
+    settings = get_settings()
+
+    if not settings.github_token:
+        raise HTTPException(status_code=503, detail="GitHub token not configured")
+
+    # Parse template repo URL
+    template_url = body.template_repo.replace("https://github.com/", "").replace(".git", "")
+    template_parts = template_url.split("/")
+    if len(template_parts) != 2:
+        raise HTTPException(status_code=400, detail=f"Invalid template_repo URL: {body.template_repo}")
+
+    template_owner, template_name = template_parts
+
+    # Create repo from template using GitHub API
+    headers = {
+        "Authorization": f"Bearer {settings.github_token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    create_payload = {
+        "owner": body.repo_owner,
+        "name": body.project_id,
+        "description": f"https://rhpds.github.io/{body.project_id}",
+        "include_all_branches": False,
+        "private": False,
+    }
+
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{template_owner}/{template_name}/generate",
+        data=json.dumps(create_payload).encode(),
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            repo_data = json.loads(r.read().decode())
+            repo_full_name = repo_data["full_name"]
+            repo_url = repo_data["html_url"]
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"GitHub repo creation failed: {e}")
+
+    # Add collaborators
+    for collab in body.collaborators:
+        username = collab.get("user", "")
+        permission = collab.get("access", "push")  # push, pull, admin, maintain, triage
+
+        collab_req = urllib.request.Request(
+            f"https://api.github.com/repos/{repo_full_name}/collaborators/{username}",
+            data=json.dumps({"permission": permission}).encode(),
+            headers=headers,
+            method="PUT",
+        )
+
+        try:
+            with urllib.request.urlopen(collab_req, timeout=15):
+                logger.info("github: added collaborator %s to %s", username, repo_full_name)
+        except Exception as e:
+            logger.warning("github: failed to add collaborator %s to %s: %s", username, repo_full_name, e)
+
+    # Wait for repo initialization (check for default branch)
+    default_branch = "main"
+    max_retries = 15
+    for i in range(max_retries):
+        try:
+            branch_req = urllib.request.Request(
+                f"https://api.github.com/repos/{repo_full_name}/git/ref/heads/{default_branch}",
+                headers=headers,
+            )
+            with urllib.request.urlopen(branch_req, timeout=10) as r:
+                ref_data = json.loads(r.read().decode())
+                commit_hash = ref_data["object"]["sha"]
+                break
+        except:
+            if i < max_retries - 1:
+                await asyncio.sleep(2)
+            else:
+                commit_hash = "unknown"
+
+    logger.info("github: created repo %s from template %s", repo_full_name, body.template_repo)
+
+    # Send ph.repo.created CloudEvent to SonataFlow
+    _send_cloud_event(
+        "ph.repo.created",
+        body.project_id,
+        {
+            "repo_url": repo_url,
+            "commit_hash": commit_hash
+        }
+    )
+
+    return CreateRepoResponse(
+        repo_url=repo_url,
+        commit_hash=commit_hash
+    )
 
 
 # ── Content Review ──────────────────────────────────────────────────────────

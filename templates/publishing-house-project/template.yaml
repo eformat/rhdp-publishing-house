@@ -14,48 +14,151 @@ spec:
   type: service
 
   parameters:
-    - title: Project Details
+    - title: Onboarding Request
+      required:
+        - asset_title
+        - project_description
+        - content_outline
+        - learning_objectives
+        - content_type
+      properties:
+        asset_title:
+          title: Asset Title
+          type: string
+          description: Name for your lab/demo
+          ui:autofocus: true
+          ui:placeholder: "OpenShift AI Workshop"
+          ui:help: This will be the display name in the catalog
+
+        project_description:
+          title: Description / Abstract
+          type: string
+          description: What is this asset and why is it needed? High-level but clear.
+          ui:widget: textarea
+          ui:options:
+            rows: 4
+          ui:placeholder: "A hands-on lab teaching developers how to deploy and manage AI workloads on OpenShift using RHOAI"
+
+        content_outline:
+          title: Content Outline
+          type: string
+          description: Rough outline of the modules or sections. Doesn't need to be final — just show the shape of what you're building.
+          ui:widget: textarea
+          ui:options:
+            rows: 8
+          ui:placeholder: "Module 1: Introduction to OpenShift AI\nModule 2: Deploying ML Models\nModule 3: Managing Training Workloads"
+
+        learning_objectives:
+          title: Learning Objectives
+          type: string
+          description: What will participants learn or be able to do? Draft quality is fine.
+          ui:widget: textarea
+          ui:options:
+            rows: 6
+          ui:placeholder: "- Deploy and manage AI/ML workloads on OpenShift\n- Configure RHOAI for production use\n- Implement MLOps best practices"
+
+        content_type:
+          title: Lab or Demo?
+          type: string
+          enum: [lab, demo]
+          enumNames: [Lab, Demo]
+          default: lab
+
+        associated_opportunities:
+          title: Associated Opportunities
+          type: string
+          description: Is this associated with any specific opportunities, projects, or marketing campaigns? N/A is acceptable.
+          ui:widget: textarea
+          ui:options:
+            rows: 3
+
+        sales_play_tdp:
+          title: Sales Play / TDP Relevance
+          type: string
+          description: Which TDP, Sales Play, and/or Sales Tactic is this most relevant to?
+          ui:widget: textarea
+          ui:options:
+            rows: 3
+
+        ai_related:
+          title: Is this related to AI?
+          type: boolean
+          default: false
+
+        gpu_needed:
+          title: Do you need direct GPU access?
+          type: boolean
+          default: false
+          ui:help: Check if GPU hardware is required
+          dependencies:
+            ai_related:
+              oneOf:
+                - properties:
+                    ai_related:
+                      const: true
+
+        maas_instead:
+          title: Can you use MaaS instead?
+          type: boolean
+          default: false
+          ui:help: Check if Model-as-a-Service can substitute for GPU
+          dependencies:
+            ai_related:
+              oneOf:
+                - properties:
+                    ai_related:
+                      const: true
+                    gpu_needed:
+                      const: false
+
+        partners_access:
+          title: Should it be available to Partners?
+          type: boolean
+          default: false
+          ui:help: Check if this content should be accessible to Red Hat partners
+
+    - title: Project Setup
       required:
         - project_name
-        - project_description
-        - content_type
-        - deployment_mode
+        - github_users
+        - tags
       properties:
         project_name:
-          title: Project Name
+          title: Project Name (slug)
           type: string
-          description: Name for your lab/demo (letters and hyphens only)
-          ui:autofocus: true
+          description: Repository name (letters, numbers, hyphens only)
           ui:placeholder: "openshift-ai-workshop"
           pattern: '^[a-z0-9-]+$'
           ui:help: Use lowercase letters, numbers, and hyphens only
 
-        project_description:
-          title: Project Description
-          type: string
-          description: Brief overview of what this project will deliver
-          ui:widget: textarea
+        github_users:
+          title: Team Members
+          type: array
+          minItems: 1
+          ui:help: "First entry is the project owner. Additional collaborators are optional."
           ui:options:
-            rows: 3
-          ui:placeholder: "A hands-on lab teaching developers how to deploy and manage AI workloads on OpenShift using RHOAI"
-
-        content_type:
-          title: Content Type
-          type: string
-          enum: [lab, demo]
-          default: lab
-
-        deployment_mode:
-          title: Deployment Mode
-          type: string
-          enum:
-            - rhdp_published
-            - self_published
-          enumNames:
-            - RHDP Published (full gates, reviewer required)
-            - Self-Published (self-approval allowed)
-          default: rhdp_published
-          ui:help: Choose review rigor level
+            addable: true
+            orderable: false
+            removable: true
+          items:
+            type: object
+            required:
+              - user
+              - email
+            properties:
+              user:
+                title: GitHub Username
+                type: string
+                ui:placeholder: "your-github-id"
+              email:
+                title: Red Hat Email
+                type: string
+                ui:placeholder: "user@redhat.com"
+              access:
+                title: Access
+                type: string
+                default: write
+                ui:widget: hidden
 
         tags:
           title: Tags
@@ -71,40 +174,14 @@ spec:
             ui:placeholder: "e.g. openshift"
           ui:help: "One tag per entry — letters, numbers, hyphens, underscores only"
 
-    - title: GitHub Collaborators
-      description: Enter your GitHub username first. You can also add collaborators who will have write access to the project repo.
-      required:
-        - github_users
-      properties:
-        github_users:
-          title: GitHub Users
-          type: array
-          minItems: 1
-          ui:help: "Your GitHub ID is required as the first entry. Additional collaborators are optional."
-          ui:options:
-            addable: true
-            orderable: false
-            removable: true
-          items:
-            type: object
-            required:
-              - user
-            properties:
-              user:
-                title: GitHub Username
-                type: string
-                ui:placeholder: "your-github-id"
-              access:
-                title: Access
-                type: string
-                default: write
-                ui:widget: hidden
-
-    - title: Initiative & Content Format
+    - title: Initiative & Technical Details
       required:
         - initiative_key
         - showroom_type
         - automation_type
+        - cloud_provider
+        - cluster_type
+        - ocp_version
       properties:
         initiative_key:
           title: Initiative
@@ -146,6 +223,45 @@ spec:
           default: ansible
           ui:help: What type of automation will this project use?
 
+        cloud_provider:
+          title: Cloud Provider
+          type: string
+          enum:
+            - cnv
+            - aws
+            - azure
+          enumNames:
+            - CNV (Default)
+            - AWS
+            - Azure
+          default: cnv
+          ui:help: Where will this run?
+
+        cluster_type:
+          title: Cluster Type
+          type: string
+          enum:
+            - sno
+            - multinode
+          enumNames:
+            - SNO (Single Node)
+            - Multinode
+          default: sno
+
+        ocp_version:
+          title: OCP Version
+          type: string
+          enum:
+            - "4.20"
+            - "4.21"
+            - "4.22"
+          enumNames:
+            - "4.20"
+            - "4.21"
+            - "4.22"
+          default: "4.21"
+          ui:help: Minimum OpenShift version
+
   steps:
     # Step 1: Check if project name is already taken
     - id: check-catalog
@@ -155,98 +271,53 @@ spec:
         entityRef: component:default/${{ parameters.project_name }}
         optional: true
 
-    # Step 2: Render skeleton artifacts into workspace
-    - id: generate-skeleton
-      name: Generate Skeleton Artifacts
-      if: ${{ steps['check-catalog'].output.entity == null }}
-      action: fetch:template
-      input:
-        url: ./skeleton
-        values:
-          project_name: ${{ parameters.project_name }}
-          project_description: ${{ parameters.project_description }}
-          content_type: ${{ parameters.content_type }}
-          deployment_mode: ${{ parameters.deployment_mode }}
-          github_user: ${{ parameters.github_users[0].user }}
-          user_email: ${{ user.entity.spec.profile.email }}
-          repo_url: https://github.com/rhpds/${{ parameters.project_name }}
-          initiative_key: ${{ parameters.initiative_key }}
-          showroom_type: ${{ parameters.showroom_type }}
-          automation_type: ${{ parameters.automation_type }}
-          intake_type: new
-          devspaces_url: https://devspaces.${{ environment.parameters.baseDomain }}
-          central_api_url: https://central-api-publishing-house.${{ environment.parameters.baseDomain }}
-          ph_git_ref: ${{ environment.parameters.phGitRef }}
-
-    # Step 3: Set created-at timestamp on catalog-info.yaml
-    - id: timestamp
-      name: Set Creation Timestamp
-      if: ${{ steps['check-catalog'].output.entity == null }}
-      action: publishing-house:timestamp
-
-    # Step 4: Create repo from GitHub template, overlay skeleton, commit and push
-    - id: create-and-push
-      name: Create Repository & Push Skeleton
-      if: ${{ steps['check-catalog'].output.entity == null }}
-      action: publishing-house:create-github-repo
-      input:
-        repoUrl: github.com?owner=rhpds&repo=${{ parameters.project_name }}
-        templateRepo: https://github.com/rhpds/rhdp-publishing-house-template
-        description: https://rhpds.github.io/${{ parameters.project_name }}
-        defaultBranch: main
-        repoVisibility: public
-        gitCommitMessage: "Add templated skeleton artifacts"
-        collaborators: ${{ parameters.github_users }}
-
-    # Step 5: Start workflow via central API
+    # Step 2: Start workflow via central API (NO repo creation - happens after pre-intake approval)
     - id: trigger-workflow
       name: Start Publishing House Workflow
       if: ${{ steps['check-catalog'].output.entity == null }}
       action: http:backstage:request
       input:
         method: POST
-        path: '/proxy/central-api/projects/${{ parameters.project_name }}'
+        path: '/proxy/central-api/projects/${{ parameters.project_name }}/start'
         headers:
           content-type: 'application/json'
         body:
-          repo_url: https://github.com/rhpds/${{ parameters.project_name }}
-          branch: main
-          project_name: ${{ parameters.project_name }}
-          deployment_mode: ${{ parameters.deployment_mode }}
-          content_type: ${{ parameters.content_type }}
+          projectId: ${{ parameters.project_name }}
+          deploymentMode: rhdp_published
+          ssoUser: ${{ user.entity.metadata.name }}
+          ssoEmail: ${{ user.entity.spec.profile.email }}
+          assetTitle: ${{ parameters.asset_title }}
+          projectDescription: ${{ parameters.project_description }}
+          contentOutline: ${{ parameters.content_outline }}
+          learningObjectives: ${{ parameters.learning_objectives }}
+          contentType: ${{ parameters.content_type }}
+          associatedOpportunities: ${{ parameters.associated_opportunities }}
+          salesPlayTdp: ${{ parameters.sales_play_tdp }}
+          aiRelated: ${{ parameters.ai_related }}
+          gpuNeeded: ${{ parameters.gpu_needed }}
+          maasInstead: ${{ parameters.maas_instead }}
+          partnersAccess: ${{ parameters.partners_access }}
+          cloudProvider: ${{ parameters.cloud_provider }}
+          clusterType: ${{ parameters.cluster_type }}
+          ocpVersion: ${{ parameters.ocp_version }}
+          automationType: ${{ parameters.automation_type }}
+          showroomType: ${{ parameters.showroom_type }}
+          initiativeKey: ${{ parameters.initiative_key }}
+          teamMembers: ${{ parameters.github_users }}
           tags: ${{ parameters.tags }}
-          project_description: ${{ parameters.project_description }}
-          audit_trail_sha: ${{ steps['create-and-push'].output.commitHash }}
-          sso_user: ${{ user.entity.metadata.name }}
-          sso_email: ${{ user.entity.spec.profile.email }}
-          showroom_type: ${{ parameters.showroom_type }}
-          intake_type: new
-
-    # Step 6: Register in catalog
-    - id: register
-      name: Register in Developer Hub Catalog
-      if: ${{ steps['check-catalog'].output.entity == null }}
-      action: catalog:register
-      input:
-        repoContentsUrl: ${{ steps['create-and-push'].output.repoContentsUrl }}
-        catalogInfoPath: '/catalog-info.yaml'
+          intakeType: new
 
   output:
     links:
-      - title: Open Repository
-        icon: github
-        url: https://github.com/rhpds/${{ parameters.project_name }}
+      - title: View Workflow Status
+        icon: dashboard
+        url: /publishing-house/projects/${{ parameters.project_name }}
         if: ${{ steps['check-catalog'].output.entity == null }}
 
-      - title: View in Catalog
-        icon: catalog
-        url: /catalog/default/component/${{ parameters.project_name }}
-        if: ${{ steps['check-catalog'].output.entity == null }}
-
-      - title: Open in DevSpaces
-        icon: launch
-        url: https://devspaces.${{ environment.parameters.baseDomain }}#https://github.com/rhpds/${{ parameters.project_name }}
-        if: ${{ steps['check-catalog'].output.entity == null }}
+      - title: View Jira Epic
+        icon: docs
+        url: ${{ steps['trigger-workflow'].output.body.jira_url }}
+        if: ${{ steps['check-catalog'].output.entity == null && steps['trigger-workflow'].output.body.jira_url }}
 
       - title: View Existing Entity in Catalog
         icon: catalog

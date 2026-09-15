@@ -51,10 +51,11 @@ import { WorkflowStage, RejectionData, ValidationReport, CheckStatus, DriftRepor
 import { STAGE_LABELS, STAGE_DESCRIPTIONS } from '../../utils/stageMapping';
 import { useUserGroups } from '../../hooks/useUserGroups';
 
-const REVIEW_STAGES: WorkflowStage[] = ['content_review', 'infra_review'];
+const REVIEW_STAGES: WorkflowStage[] = ['pre_intake_review', 'content_review', 'infra_review'];
 const STAGES_WITH_REVIEW_TAB: WorkflowStage[] = [
-  'content_review', 'infra_review', 'env_setup', 'development', 'testing', 'published',
+  'pre_intake_review', 'content_review', 'infra_review', 'env_setup', 'development', 'testing', 'published',
 ];
+const PRE_INTAKE_STAGES: WorkflowStage[] = ['pre_intake_update', 'pre_intake_review'];
 
 const CHECK_GROUP_LABELS: Record<string, string> = {
   A: 'Spec Fields',
@@ -206,6 +207,34 @@ export function WorkflowDetailPage() {
     }
   }, [result, fetchReport]);
 
+  // Initialize pre-intake fields from workflow data
+  useEffect(() => {
+    if (!result) return;
+    const wd = result.instance?.variables?.workflowdata as any;
+    if (!wd) return;
+
+    setPreIntakeFields({
+      assetTitle: wd.assetTitle || '',
+      projectDescription: wd.projectDescription || '',
+      contentOutline: wd.contentOutline || '',
+      learningObjectives: wd.learningObjectives || '',
+      contentType: wd.contentType || 'lab',
+      associatedOpportunities: wd.associatedOpportunities || '',
+      salesPlayTdp: wd.salesPlayTdp || '',
+      aiRelated: wd.aiRelated || false,
+      gpuNeeded: wd.gpuNeeded || false,
+      maasInstead: wd.maasInstead || false,
+      partnersAccess: wd.partnersAccess || false,
+      cloudProvider: wd.cloudProvider || 'cnv',
+      clusterType: wd.clusterType || 'sno',
+      ocpVersion: wd.ocpVersion || '4.21',
+      automationType: wd.automationType || 'ansible',
+      showroomType: wd.showroomType || 'classic',
+      initiativeKey: wd.initiativeKey || 'rh1_2027',
+      tags: wd.tags || [],
+    });
+  }, [result]);
+
   const [approvingStage, setApprovingStage] = useState<string | null>(null);
   const [rejectionDialogOpen, setRejectionDialogOpen] = useState(false);
   const [rejectingStage, setRejectingStage] = useState<WorkflowStage | null>(null);
@@ -325,6 +354,70 @@ export function WorkflowDetailPage() {
     setRejectingStage(null);
   };
 
+  const [preIntakeAction, setPreIntakeAction] = useState<'approved' | 'sendback' | 'rejected' | null>(null);
+  const [preIntakeNotes, setPreIntakeNotes] = useState('');
+  const [preIntakeNotesDialogOpen, setPreIntakeNotesDialogOpen] = useState(false);
+  const [preIntakeFields, setPreIntakeFields] = useState<Record<string, any>>({});
+  const [submittingPreIntakeUpdate, setSubmittingPreIntakeUpdate] = useState(false);
+
+  const handlePreIntakeAction = async (action: 'approved' | 'sendback' | 'rejected', notes?: string) => {
+    if (!result) return;
+    setPreIntakeAction(action);
+    try {
+      await client.sendPreIntakeAction(result.summary.projectId, action, notes);
+      setPreIntakeNotesDialogOpen(false);
+      setSnackbar({
+        open: true,
+        severity: 'success',
+        message: `Pre-intake ${action} — waiting for workflow to advance...`,
+      });
+      const prevStage = result.summary.stage;
+      for (let i = 0; i < 6; i++) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        const updated = await client.getWorkflow(result.summary.projectId);
+        if (updated && updated.summary.stage !== prevStage) break;
+      }
+      setRefreshKey(k => k + 1);
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        severity: 'error',
+        message: `Pre-intake ${action} failed: ${err.message}`,
+      });
+    } finally {
+      setPreIntakeAction(null);
+      setPreIntakeNotes('');
+    }
+  };
+
+  const handleSubmitPreIntakeUpdate = async () => {
+    if (!result) return;
+    setSubmittingPreIntakeUpdate(true);
+    try {
+      await client.submitPreIntakeUpdate(result.summary.projectId, preIntakeFields);
+      setSnackbar({
+        open: true,
+        severity: 'success',
+        message: 'Pre-intake update submitted — waiting for workflow to advance...',
+      });
+      const prevStage = result.summary.stage;
+      for (let i = 0; i < 6; i++) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        const updated = await client.getWorkflow(result.summary.projectId);
+        if (updated && updated.summary.stage !== prevStage) break;
+      }
+      setRefreshKey(k => k + 1);
+    } catch (err: any) {
+      setSnackbar({
+        open: true,
+        severity: 'error',
+        message: `Pre-intake update failed: ${err.message}`,
+      });
+    } finally {
+      setSubmittingPreIntakeUpdate(false);
+    }
+  };
+
   const handleSendMessage = async (text: string) => {
     if (!result) return;
     setSendingMessage(true);
@@ -429,7 +522,10 @@ export function WorkflowDetailPage() {
 
   const isReviewStage = REVIEW_STAGES.includes(summary.stage);
   const hasReviewTab = STAGES_WITH_REVIEW_TAB.includes(summary.stage);
+  const isPreIntakeStage = PRE_INTAKE_STAGES.includes(summary.stage);
   const hasStagingTab = summary.stage === 'env_setup' || Boolean(wd?.agnosticvUrls?.length) || Boolean(wd?.ciUrls?.length);
+  const canPreIntakeReview = summary.stage === 'pre_intake_review' && (isContentReviewer || isInfraReviewer || isAdmin);
+  const canPreIntakeUpdate = summary.stage === 'pre_intake_update';
   const canReview = (summary.stage === 'content_review' && (isContentReviewer || isAdmin))
     || (summary.stage === 'infra_review' && (isInfraReviewer || isAdmin));
   const canStaging = summary.stage === 'env_setup' && (isContentDeveloper || isAdmin);
@@ -501,6 +597,7 @@ export function WorkflowDetailPage() {
             rejectedFrom={rejectedFrom}
             hasDrift={wd?.hasDrift}
             envSetupSkipped={wd?.showroomType === 'zero_touch'}
+            preIntakeUpdateSkipped={!wd?.preIntakeSentBack}
           />
         </InfoCard>
 
@@ -586,6 +683,231 @@ export function WorkflowDetailPage() {
 
         {hasReviewTab && activeTab === 1 && (
           <>
+            {/* Pre-Intake Update Panel (Editable) */}
+            {summary.stage === 'pre_intake_update' && (
+              <>
+                <InfoCard title="Update Pre-Intake Request">
+                  <Typography variant="body2" color="textSecondary" style={{ marginBottom: 16 }}>
+                    Update your onboarding request based on reviewer feedback. All fields are editable.
+                  </Typography>
+                  <Grid container spacing={2}>
+                    <Grid item xs={12}>
+                      <Typography className={classes.label}>Asset Title *</Typography>
+                      <TextField
+                        fullWidth
+                        variant="outlined"
+                        size="small"
+                        value={preIntakeFields.assetTitle || ''}
+                        onChange={(e) => setPreIntakeFields({ ...preIntakeFields, assetTitle: e.target.value })}
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography className={classes.label}>Description *</Typography>
+                      <TextField
+                        fullWidth
+                        multiline
+                        rows={3}
+                        variant="outlined"
+                        value={preIntakeFields.projectDescription || ''}
+                        onChange={(e) => setPreIntakeFields({ ...preIntakeFields, projectDescription: e.target.value })}
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography className={classes.label}>Content Outline *</Typography>
+                      <TextField
+                        fullWidth
+                        multiline
+                        rows={4}
+                        variant="outlined"
+                        value={preIntakeFields.contentOutline || ''}
+                        onChange={(e) => setPreIntakeFields({ ...preIntakeFields, contentOutline: e.target.value })}
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography className={classes.label}>Learning Objectives *</Typography>
+                      <TextField
+                        fullWidth
+                        multiline
+                        rows={3}
+                        variant="outlined"
+                        value={preIntakeFields.learningObjectives || ''}
+                        onChange={(e) => setPreIntakeFields({ ...preIntakeFields, learningObjectives: e.target.value })}
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography className={classes.label}>Associated Opportunities</Typography>
+                      <TextField
+                        fullWidth
+                        multiline
+                        rows={2}
+                        variant="outlined"
+                        value={preIntakeFields.associatedOpportunities || ''}
+                        onChange={(e) => setPreIntakeFields({ ...preIntakeFields, associatedOpportunities: e.target.value })}
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <Typography className={classes.label}>Sales Play / TDP</Typography>
+                      <TextField
+                        fullWidth
+                        multiline
+                        rows={2}
+                        variant="outlined"
+                        value={preIntakeFields.salesPlayTdp || ''}
+                        onChange={(e) => setPreIntakeFields({ ...preIntakeFields, salesPlayTdp: e.target.value })}
+                      />
+                    </Grid>
+                  </Grid>
+                </InfoCard>
+
+                <InfoCard>
+                  <Button
+                    variant="contained"
+                    style={{ backgroundColor: '#4caf50', color: '#fff', fontWeight: 600 }}
+                    size="large"
+                    startIcon={
+                      submittingPreIntakeUpdate ? (
+                        <CircularProgress size={16} color="inherit" />
+                      ) : undefined
+                    }
+                    onClick={handleSubmitPreIntakeUpdate}
+                    disabled={submittingPreIntakeUpdate}
+                  >
+                    {submittingPreIntakeUpdate ? 'Submitting...' : 'Submit Update'}
+                  </Button>
+                </InfoCard>
+              </>
+            )}
+
+            {/* Pre-Intake Review Panel */}
+            {summary.stage === 'pre_intake_review' && (
+              <InfoCard title="Pre-Intake Request Summary">
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <DetailField label="Asset Title" value={wd?.assetTitle || '—'} />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <DetailField label="Description" value={wd?.projectDescription || '—'} />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <DetailField label="Content Outline" value={wd?.contentOutline || '—'} />
+                  </Grid>
+                  <Grid item xs={12}>
+                    <DetailField label="Learning Objectives" value={wd?.learningObjectives || '—'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <DetailField label="Content Type" value={wd?.contentType || '—'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <DetailField label="Showroom Type" value={wd?.showroomType || '—'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <DetailField label="Cloud Provider" value={wd?.cloudProvider || '—'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <DetailField label="Cluster Type" value={wd?.clusterType || '—'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <DetailField label="OCP Version" value={wd?.ocpVersion || '—'} />
+                  </Grid>
+                  <Grid item xs={4}>
+                    <DetailField label="Automation Type" value={wd?.automationType || '—'} />
+                  </Grid>
+                  {wd?.aiRelated && (
+                    <>
+                      <Grid item xs={4}>
+                        <DetailField label="AI Related" value="Yes" />
+                      </Grid>
+                      {wd?.gpuNeeded && (
+                        <Grid item xs={4}>
+                          <DetailField label="GPU Needed" value="Yes" />
+                        </Grid>
+                      )}
+                      {wd?.maasInstead && (
+                        <Grid item xs={4}>
+                          <DetailField label="Use MaaS" value="Yes" />
+                        </Grid>
+                      )}
+                    </>
+                  )}
+                  {wd?.partnersAccess && (
+                    <Grid item xs={4}>
+                      <DetailField label="Partners Access" value="Yes" />
+                    </Grid>
+                  )}
+                  {wd?.associatedOpportunities && (
+                    <Grid item xs={12}>
+                      <DetailField label="Associated Opportunities" value={wd.associatedOpportunities} />
+                    </Grid>
+                  )}
+                  {wd?.salesPlayTdp && (
+                    <Grid item xs={12}>
+                      <DetailField label="Sales Play / TDP" value={wd.salesPlayTdp} />
+                    </Grid>
+                  )}
+                  <Grid item xs={4}>
+                    <DetailField label="Initiative" value={wd?.initiativeKey || '—'} />
+                  </Grid>
+                  {wd?.tags && wd.tags.length > 0 && (
+                    <Grid item xs={12}>
+                      <DetailField label="Tags" value={wd.tags.join(', ')} />
+                    </Grid>
+                  )}
+                </Grid>
+              </InfoCard>
+            )}
+
+            {/* Pre-Intake Action Buttons */}
+            {canPreIntakeReview && (
+              <InfoCard>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <Button
+                    variant="contained"
+                    style={{ backgroundColor: '#4caf50', color: '#fff', fontWeight: 600 }}
+                    size="large"
+                    startIcon={
+                      preIntakeAction === 'approved' ? (
+                        <CircularProgress size={16} color="inherit" />
+                      ) : undefined
+                    }
+                    onClick={() => handlePreIntakeAction('approved')}
+                    disabled={preIntakeAction !== null}
+                  >
+                    {preIntakeAction === 'approved' ? 'Approving...' : 'Approve'}
+                  </Button>
+                  <Button
+                    variant="contained"
+                    style={{ backgroundColor: '#ff9800', color: '#fff', fontWeight: 600 }}
+                    size="large"
+                    startIcon={
+                      preIntakeAction === 'sendback' ? (
+                        <CircularProgress size={16} color="inherit" />
+                      ) : undefined
+                    }
+                    onClick={() => {
+                      setPreIntakeNotesDialogOpen(true);
+                    }}
+                    disabled={preIntakeAction !== null}
+                  >
+                    {preIntakeAction === 'sendback' ? 'Sending Back...' : 'Send Back'}
+                  </Button>
+                  <Button
+                    variant="contained"
+                    style={{ backgroundColor: '#e57373', color: '#fff', fontWeight: 600 }}
+                    size="large"
+                    startIcon={
+                      preIntakeAction === 'rejected' ? (
+                        <CircularProgress size={16} color="inherit" />
+                      ) : undefined
+                    }
+                    onClick={() => handlePreIntakeAction('rejected')}
+                    disabled={preIntakeAction !== null}
+                  >
+                    {preIntakeAction === 'rejected' ? 'Rejecting...' : 'Reject'}
+                  </Button>
+                </div>
+              </InfoCard>
+            )}
+
             {/* Spec File Links */}
             {summary.repoUrl && (
               <InfoCard title="Spec Files">
@@ -1404,6 +1726,37 @@ export function WorkflowDetailPage() {
               disabled={approvingStage !== null}
             >
               Submit
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        <Dialog open={preIntakeNotesDialogOpen} onClose={() => setPreIntakeNotesDialogOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Send Back with Feedback</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="textSecondary" gutterBottom style={{ marginBottom: 16 }}>
+              Provide feedback to the project author on what needs to be updated.
+            </Typography>
+            <TextField
+              fullWidth
+              multiline
+              rows={4}
+              variant="outlined"
+              value={preIntakeNotes}
+              onChange={(e) => setPreIntakeNotes(e.target.value)}
+              placeholder="Feedback for author..."
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setPreIntakeNotesDialogOpen(false)}>Cancel</Button>
+            <Button
+              variant="contained"
+              style={{ backgroundColor: '#ff9800', color: '#fff', fontWeight: 600 }}
+              onClick={() => {
+                handlePreIntakeAction('sendback', preIntakeNotes);
+              }}
+              disabled={preIntakeAction !== null}
+            >
+              Send Back
             </Button>
           </DialogActions>
         </Dialog>

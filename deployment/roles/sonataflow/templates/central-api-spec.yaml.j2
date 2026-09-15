@@ -9,7 +9,7 @@ paths:
   /jira/epic:
     post:
       operationId: createJiraEpic
-      summary: Create a minimal Jira epic for a new project
+      summary: Create a Jira epic with rich description and optional ProForma form
       requestBody:
         required: true
         content:
@@ -17,20 +17,18 @@ paths:
             schema:
               type: object
               required:
-                - project_name
+                - epic_type
+                - fields
               properties:
-                project_name:
+                epic_type:
                   type: string
-                content_type:
-                  type: string
-                deployment_mode:
-                  type: string
-                project_description:
-                  type: string
-                showroom_type:
-                  type: string
+                  enum: [rhdp_published, field_source]
+                  description: Type of epic to create
+                fields:
+                  type: object
+                  description: All template fields as key-value pairs
       responses:
-        '201':
+        '200':
           description: Epic created successfully
           content:
             application/json:
@@ -40,6 +38,90 @@ paths:
                   epic_key:
                     type: string
                   jira_url:
+                    type: string
+                  proforma_form_id:
+                    type: string
+      security:
+        - bearerAuth: []
+  /jira/epic/update:
+    post:
+      operationId: updateJiraEpic
+      summary: Update Jira epic description after pre-intake approval
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - epic_key
+                - epic_type
+              properties:
+                epic_key:
+                  type: string
+                epic_type:
+                  type: string
+                  enum: [rhdp_published, field_source]
+                proforma_form_id:
+                  type: string
+                fields:
+                  type: object
+                  description: Fallback field values if ProForma not used
+      responses:
+        '200':
+          description: Epic updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  epic_key:
+                    type: string
+                  updated:
+                    type: boolean
+      security:
+        - bearerAuth: []
+  /projects/create-repo:
+    post:
+      operationId: createRepo
+      summary: Create GitHub repository from template and add collaborators
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - project_id
+                - repo_owner
+                - template_repo
+              properties:
+                project_id:
+                  type: string
+                repo_owner:
+                  type: string
+                template_repo:
+                  type: string
+                collaborators:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      user:
+                        type: string
+                      access:
+                        type: string
+      responses:
+        '200':
+          description: Repository created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  repo_url:
+                    type: string
+                  commit_hash:
                     type: string
       security:
         - bearerAuth: []

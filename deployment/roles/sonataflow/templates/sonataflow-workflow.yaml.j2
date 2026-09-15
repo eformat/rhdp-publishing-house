@@ -2,9 +2,9 @@ apiVersion: sonataflow.org/v1alpha08
 kind: SonataFlow
 metadata:
   annotations:
-    sonataflow.org/description: 4-stage content lifecycle orchestration
+    sonataflow.org/description: Publishing House content lifecycle with pre-intake review
     sonataflow.org/profile: preview
-    sonataflow.org/version: "1.8"
+    sonataflow.org/version: "2.0"
   labels:
     app: publishing-house
     component: workflow
@@ -73,6 +73,55 @@ spec:
         name: TestingCompleteEvent
         source: publishing-house
         type: ph.testing.complete
+      - correlation:
+          - contextAttributeName: projectid
+        dataOnly: true
+        kind: consumed
+        name: PreIntakeApprovedEvent
+        source: publishing-house
+        type: ph.preintake.approved
+      - correlation:
+          - contextAttributeName: projectid
+        dataOnly: true
+        kind: consumed
+        name: PreIntakeSendBackEvent
+        source: publishing-house
+        type: ph.preintake.sendback
+      - correlation:
+          - contextAttributeName: projectid
+        dataOnly: true
+        kind: consumed
+        name: PreIntakeRejectedEvent
+        source: publishing-house
+        type: ph.preintake.rejected
+      - correlation:
+          - contextAttributeName: projectid
+        dataOnly: true
+        kind: consumed
+        name: PreIntakeUpdateSubmittedEvent
+        source: publishing-house
+        type: ph.preintake.update.submitted
+      - correlation:
+          - contextAttributeName: projectid
+        dataOnly: true
+        kind: consumed
+        name: EpicCreatedEvent
+        source: publishing-house
+        type: ph.epic.created
+      - correlation:
+          - contextAttributeName: projectid
+        dataOnly: true
+        kind: consumed
+        name: EpicUpdatedEvent
+        source: publishing-house
+        type: ph.epic.updated
+      - correlation:
+          - contextAttributeName: projectid
+        dataOnly: true
+        kind: consumed
+        name: RepoCreatedEvent
+        source: publishing-house
+        type: ph.repo.created
     functions:
       - name: printMessage
         operation: sysout
@@ -82,6 +131,12 @@ spec:
         type: rest
       - name: syncjiratasks
         operation: specs/central-api.yaml#syncJiraTasks
+        type: rest
+      - name: updatejiraepic
+        operation: specs/central-api.yaml#updateJiraEpic
+        type: rest
+      - name: createrepo
+        operation: specs/central-api.yaml#createRepo
         type: rest
     start:
       stateName: Init
@@ -103,11 +158,26 @@ spec:
               ssoEmail: .ssoEmail,
               projectid: .projectId,
               contentType: .contentType,
-              repoUrl: .repoUrl,
+              repoUrl: (.repoUrl // ""),
               tags: (.tags // []),
               projectDescription: (.projectDescription // ""),
               showroomType: (.showroomType // "classic"),
               intakeType: (.intakeType // "new"),
+              assetTitle: (.assetTitle // ""),
+              contentOutline: (.contentOutline // ""),
+              learningObjectives: (.learningObjectives // ""),
+              associatedOpportunities: (.associatedOpportunities // ""),
+              salesPlayTdp: (.salesPlayTdp // ""),
+              aiRelated: (.aiRelated // false),
+              gpuNeeded: (.gpuNeeded // false),
+              maasInstead: (.maasInstead // false),
+              partnersAccess: (.partnersAccess // false),
+              cloudProvider: (.cloudProvider // "cnv"),
+              clusterType: (.clusterType // "sno"),
+              ocpVersion: (.ocpVersion // "4.21"),
+              automationType: (.automationType // "ansible"),
+              initiativeKey: (.initiativeKey // "rh1_2027"),
+              teamMembers: (.teamMembers // []),
               reviews: {
                 content: false,
                 infra: false
@@ -119,7 +189,10 @@ spec:
               notes: [],
               baselineSha: "",
               auditTrailSha: (.auditTrailSha // ""),
-              hasDrift: false
+              hasDrift: false,
+              epic_key: "",
+              jira_url: "",
+              proforma_form_id: ""
             }
         transition:
           nextState: CreateEpic
@@ -131,31 +204,183 @@ spec:
             functionRef:
               refName: createjiraepic
               arguments:
-                deployment_mode: .deploymentMode
-                project_name: .projectId
-                content_type: .contentType
-                project_description: .projectDescription
-                showroom_type: (.showroomType // "classic")
-            actionDataFilter:
-              toStateData: .epicResponse
+                epic_type: .deploymentMode
+                fields: .
+        transition:
+          nextState: WaitForEpic
+      - name: WaitForEpic
+        type: event
+        exclusive: true
+        onEvents:
+          - eventRefs:
+              - EpicCreatedEvent
+            eventDataFilter:
+              toStateData: ".epicData"
+        timeouts:
+          stateExecTimeout: PT30S
         stateDataFilter:
           output: |
             . + {
-              epic_key: (
-                if .epicResponse
-                then .epicResponse.epic_key
-                else ""
-                end
-              ),
-              jira_url: (
-                if .epicResponse
-                then .epicResponse.jira_url
-                else ""
+              epic_key: (.epicData.epic_key // ""),
+              jira_url: (.epicData.jira_url // ""),
+              proforma_form_id: (.epicData.proforma_form_id // "")
+            } | del(.epicData)
+        transition:
+          nextState: PreIntakeUpdate
+      - name: PreIntakeUpdate
+        type: event
+        exclusive: true
+        onEvents:
+          - eventRefs:
+              - PreIntakeUpdateSubmittedEvent
+            eventDataFilter:
+              toStateData: ".updatedFields"
+        stateDataFilter:
+          input: |
+            . + {
+              updatedFields: null,
+              reviewHistory: ((.reviewHistory // []) + [{
+                stage: "preintake_update",
+                action: "submitted",
+                timestamp: (now | tostring),
+                user: .ssoUser
+              }])
+            }
+          output: |
+            . + (.updatedFields // {}) + {
+              reviewHistory: ((.reviewHistory // []) + [{
+                stage: "preintake_update",
+                action: "completed",
+                timestamp: (now | tostring),
+                user: .ssoUser
+              }])
+            } | del(.updatedFields)
+        transition:
+          nextState: PreIntakeReview
+      - name: PreIntakeReview
+        type: event
+        exclusive: true
+        onEvents:
+          - eventRefs:
+              - PreIntakeApprovedEvent
+            eventDataFilter:
+              toStateData: ".reviewAction"
+          - eventRefs:
+              - PreIntakeSendBackEvent
+            eventDataFilter:
+              toStateData: ".reviewAction"
+          - eventRefs:
+              - PreIntakeRejectedEvent
+            eventDataFilter:
+              toStateData: ".reviewAction"
+        timeouts:
+          stateExecTimeout: PT168H
+        stateDataFilter:
+          input: |
+            . + {
+              reviewAction: null,
+              reviewHistory: ((.reviewHistory // []) + [{
+                stage: "preintake_review",
+                action: "started",
+                timestamp: (now | tostring),
+                user: "system"
+              }])
+            }
+          output: |
+            . + {
+              reviewHistory: ((.reviewHistory // []) + (if .reviewAction then [.reviewAction] else [] end)),
+              rejection: (
+                if .reviewAction and .reviewAction.action == "rejected"
+                then {
+                  isRejected: true,
+                  reviewerName: .reviewAction.user,
+                  reviewerStage: "preintake",
+                  timestamp: .reviewAction.timestamp,
+                  reasons: (.reviewAction.reasons // [])
+                }
+                else { isRejected: false }
                 end
               )
-            } | del(.epicResponse)
+            } | del(.reviewAction)
+        transition:
+          nextState: PreIntakeReviewDecision
+      - name: PreIntakeReviewDecision
+        type: switch
+        dataConditions:
+          - name: Rejected
+            condition: "${ .rejection.isRejected == true }"
+            transition:
+              nextState: Rejected
+          - name: SendBack
+            condition: |
+              ${
+                (.reviewHistory // [])[-1].action == "sendback"
+              }
+            transition:
+              nextState: PreIntakeUpdate
+        defaultCondition:
+          transition:
+            nextState: UpdateEpic
+      - name: UpdateEpic
+        type: operation
+        actions:
+          - name: UpdateJiraEpic
+            condition: "${ .deploymentMode == \"rhdp_published\" and .epic_key != \"\" }"
+            functionRef:
+              refName: updatejiraepic
+              arguments:
+                epic_key: .epic_key
+                epic_type: .deploymentMode
+                proforma_form_id: (.proforma_form_id // "")
+        transition:
+          nextState: WaitForEpicUpdate
+      - name: WaitForEpicUpdate
+        type: event
+        exclusive: true
+        onEvents:
+          - eventRefs:
+              - EpicUpdatedEvent
+        timeouts:
+          stateExecTimeout: PT30S
+        transition:
+          nextState: CreateRepo
+      - name: CreateRepo
+        type: operation
+        actions:
+          - name: CreateGitHubRepo
+            functionRef:
+              refName: createrepo
+              arguments:
+                project_id: .projectId
+                repo_owner: "rhpds"
+                template_repo: "https://github.com/rhpds/rhdp-publishing-house-template"
+                collaborators: (.teamMembers // [])
+        transition:
+          nextState: WaitForRepo
+      - name: WaitForRepo
+        type: event
+        exclusive: true
+        onEvents:
+          - eventRefs:
+              - RepoCreatedEvent
+            eventDataFilter:
+              toStateData: ".repoData"
+        timeouts:
+          stateExecTimeout: PT60S
+        stateDataFilter:
+          output: |
+            . + {
+              repoUrl: (.repoData.repoUrl // ""),
+              commitHash: (.repoData.commitHash // "")
+            } | del(.repoData)
         transition:
           nextState: Intake
+      - name: Rejected
+        type: inject
+        data:
+          stage: rejected
+        end:
+          terminate: true
       - name: Intake
         type: event
         exclusive: true

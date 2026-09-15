@@ -219,6 +219,48 @@ export function createPhWorkflowsClient(options: {
     return { summary: toSummary(inst), instance: inst };
   }
 
+  async function sendPreIntakeAction(
+    projectId: string,
+    action: 'approved' | 'sendback' | 'rejected',
+    notes?: string,
+  ): Promise<void> {
+    const response = await centralFetch(
+      `/projects/${projectId}/preintake`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          action,
+          notes: notes || '',
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Pre-intake ${action} failed: ${response.status} ${response.statusText}`,
+      );
+    }
+  }
+
+  async function submitPreIntakeUpdate(
+    projectId: string,
+    fields: Record<string, any>,
+  ): Promise<void> {
+    const response = await centralFetch(
+      `/projects/${projectId}/preintake/update`,
+      {
+        method: 'POST',
+        body: JSON.stringify(fields),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        `Pre-intake update failed: ${response.status} ${response.statusText}`,
+      );
+    }
+  }
+
   async function sendApprovalEvent(
     workflowId: string,
     stage: WorkflowStage,
@@ -568,6 +610,8 @@ export function createPhWorkflowsClient(options: {
     getWorkflows,
     getWorkflow,
     getWorkflowById,
+    sendPreIntakeAction,
+    submitPreIntakeUpdate,
     sendApprovalEvent,
     sendRejectionEvent,
     fetchValidationReport,
