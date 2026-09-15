@@ -8,7 +8,7 @@ class Settings(BaseSettings):
 
     # API Configuration
     api_title: str = "Publishing House Central API"
-    api_version: str = "1.21.24"
+    api_version: str = "2.0.0"
     api_prefix: str = "/api/v1"
 
     # Authentication
@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # GitHub integration
     github_token: str = ""
+    github_template_repo: str = "https://github.com/rhpds/rhdp-publishing-house-template"
 
     # OIDC/Keycloak authentication (for portal endpoints)
     oidc_issuer_url: str = ""

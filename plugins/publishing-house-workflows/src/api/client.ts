@@ -221,7 +221,7 @@ export function createPhWorkflowsClient(options: {
 
   async function sendPreIntakeAction(
     projectId: string,
-    action: 'approved' | 'sendback' | 'rejected',
+    action: 'approved' | 'rejected' | 'cancelled',
     notes?: string,
   ): Promise<void> {
     const response = await centralFetch(

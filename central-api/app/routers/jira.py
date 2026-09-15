@@ -47,7 +47,23 @@ class UpdateEpicRequest(BaseModel):
 
 class UpdateEpicResponse(BaseModel):
     epic_key: str
-    updated: bool
+    jira_url: str
+
+
+class PreIntakeDataResponse(BaseModel):
+    epic_key: str
+    assetTitle: str
+    projectDescription: str
+    contentOutline: str
+    learningObjectives: str
+    contentType: str
+    automationType: str
+    associatedOpportunities: str = ""
+    salesPlayTdp: str = ""
+    aiRelated: bool = False
+    gpuNeeded: bool = False
+    maasInstead: bool = False
+    partnersAccess: bool = False
 
 
 
@@ -402,14 +418,125 @@ def _format_field_source_epic(fields: dict) -> tuple[str, dict]:
 
 def _create_proforma_form(epic_key: str, epic_type: str, fields: dict, settings: Settings) -> str:
     """Create ProForma form on epic. Returns form_id or empty string on failure."""
-    # ProForma API is not implemented in this iteration - placeholder for future
-    # When implemented, this will:
-    # 1. Build form template based on epic_type
-    # 2. Map fields to form answers
-    # 3. POST to /rest/api/1/form/{epic_key}
-    # 4. Return form_id from response
-    logger.info("ProForma form creation not yet implemented for epic %s", epic_key)
-    return ""
+    auth_str = base64.b64encode(f"{settings.jira_email}:{settings.jira_api_token}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {auth_str}",
+        "Content-Type": "application/json",
+    }
+
+    # Build ProForma form template with onboarding fields
+    form_data = {
+        "name": "Pre-Intake Onboarding",
+        "description": "Pre-intake onboarding questions for content creation",
+        "questions": [
+            {
+                "id": "asset_title",
+                "label": "Asset Title",
+                "type": "text",
+                "required": True,
+                "value": fields.get("assetTitle", "")
+            },
+            {
+                "id": "project_description",
+                "label": "Description / Abstract",
+                "type": "paragraph",
+                "required": True,
+                "value": fields.get("projectDescription", "")
+            },
+            {
+                "id": "content_outline",
+                "label": "Content Outline",
+                "type": "paragraph",
+                "required": True,
+                "value": fields.get("contentOutline", "")
+            },
+            {
+                "id": "learning_objectives",
+                "label": "Learning Objectives",
+                "type": "paragraph",
+                "required": True,
+                "value": fields.get("learningObjectives", "")
+            },
+            {
+                "id": "content_type",
+                "label": "Is this a lab or a demo?",
+                "type": "radio",
+                "required": True,
+                "options": ["lab", "demo"],
+                "value": fields.get("contentType", "lab")
+            },
+            {
+                "id": "associated_opportunities",
+                "label": "Associated opportunities",
+                "type": "paragraph",
+                "required": False,
+                "value": fields.get("associatedOpportunities", "")
+            },
+            {
+                "id": "sales_play_tdp",
+                "label": "Sales Play / TDP relevance",
+                "type": "paragraph",
+                "required": False,
+                "value": fields.get("salesPlayTdp", "")
+            },
+            {
+                "id": "automation_type",
+                "label": "How will you automate?",
+                "type": "radio",
+                "required": True,
+                "options": ["ansible", "gitops", "both"],
+                "value": fields.get("automationType", "ansible")
+            },
+            {
+                "id": "ai_related",
+                "label": "Is this related to AI?",
+                "type": "radio",
+                "required": False,
+                "options": ["yes", "no"],
+                "value": "yes" if fields.get("aiRelated") else "no"
+            },
+            {
+                "id": "gpu_needed",
+                "label": "Do you need direct GPU access?",
+                "type": "radio",
+                "required": False,
+                "options": ["yes", "no"],
+                "value": "yes" if fields.get("gpuNeeded") else "no"
+            },
+            {
+                "id": "maas_instead",
+                "label": "Can you use MaaS instead?",
+                "type": "radio",
+                "required": False,
+                "options": ["yes", "no"],
+                "value": "yes" if fields.get("maasInstead") else "no"
+            },
+            {
+                "id": "partners_access",
+                "label": "Should it be available to Partners?",
+                "type": "radio",
+                "required": False,
+                "options": ["yes", "no"],
+                "value": "yes" if fields.get("partnersAccess") else "no"
+            }
+        ]
+    }
+
+    try:
+        req = urllib.request.Request(
+            f"{settings.jira_url.rstrip('/')}/rest/api/1/form/{epic_key}",
+            data=json.dumps(form_data).encode(),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=20) as r:
+            response_data = json.loads(r.read().decode())
+            form_id = response_data.get("id", "")
+            logger.info("ProForma form created for epic %s: %s", epic_key, form_id)
+            return form_id
+    except Exception as e:
+        logger.error("ProForma form creation failed for epic %s: %s", epic_key, e)
+        return ""
 
 
 @router.post("/epic", response_model=CreateEpicResponse, status_code=201)
@@ -567,28 +694,17 @@ def create_epic(
             points=POINTS.get(ft["id"]),
         )
 
-    # Try to create ProForma form (placeholder - not yet implemented)
+    # Create ProForma form for rhdp_published epics only (pre-intake onboarding)
     proforma_form_id = ""
-    try:
-        proforma_form_id = _create_proforma_form(epic_key, body.epic_type, body.fields, settings)
-    except Exception as e:
-        logger.warning("jira: ProForma form creation failed for epic %s: %s", epic_key, e)
+    if body.epic_type == "rhdp_published":
+        try:
+            proforma_form_id = _create_proforma_form(epic_key, body.epic_type, body.fields, settings)
+        except Exception as e:
+            logger.warning("jira: ProForma form creation failed for epic %s: %s", epic_key, e)
 
     jira_url = f"{settings.jira_url}/browse/{epic_key}"
     project_id = body.fields.get("projectId", "unknown")
     logger.info("jira: created epic %s for project %s", epic_key, project_id)
-
-    # Send ph.epic.created CloudEvent to SonataFlow
-    _send_cloud_event(
-        "ph.epic.created",
-        project_id,
-        {
-            "epic_key": epic_key,
-            "jira_url": jira_url,
-            "proforma_form_id": proforma_form_id
-        },
-        settings
-    )
 
     return CreateEpicResponse(
         epic_key=epic_key,
@@ -610,11 +726,59 @@ def update_epic(
         raise HTTPException(status_code=503, detail="Jira not configured")
 
     # Get final field values (from ProForma or workflow)
-    if body.proforma_form_id:
-        # TODO: Read ProForma form data when implemented
-        # For now, fallback to workflow fields
-        logger.info("jira: ProForma read not implemented, using workflow fields for epic %s", body.epic_key)
-        final_fields = body.fields
+    if body.proforma_form_id and body.epic_type == "rhdp_published":
+        # Read current values from ProForma form
+        try:
+            auth_str = base64.b64encode(f"{settings.jira_email}:{settings.jira_api_token}".encode()).decode()
+            headers = {
+                "Authorization": f"Basic {auth_str}",
+                "Content-Type": "application/json",
+            }
+
+            req = urllib.request.Request(
+                f"{settings.jira_url.rstrip('/')}/rest/api/1/form/{body.epic_key}",
+                headers=headers,
+            )
+            with urllib.request.urlopen(req, context=_SSL_CTX, timeout=15) as r:
+                form_data = json.loads(r.read().decode())
+
+            # Extract values from form questions
+            questions = form_data.get("questions", [])
+            final_fields = {}
+            for q in questions:
+                q_id = q.get("id", "")
+                q_value = q.get("value", "")
+
+                # Map ProForma field IDs back to field names
+                field_mapping = {
+                    "asset_title": "assetTitle",
+                    "project_description": "projectDescription",
+                    "content_outline": "contentOutline",
+                    "learning_objectives": "learningObjectives",
+                    "content_type": "contentType",
+                    "automation_type": "automationType",
+                    "associated_opportunities": "associatedOpportunities",
+                    "sales_play_tdp": "salesPlayTdp",
+                    "ai_related": "aiRelated",
+                    "gpu_needed": "gpuNeeded",
+                    "maas_instead": "maasInstead",
+                    "partners_access": "partnersAccess",
+                }
+
+                if q_id in field_mapping:
+                    field_name = field_mapping[q_id]
+                    # Convert radio yes/no to boolean
+                    if q_id in ["ai_related", "gpu_needed", "maas_instead", "partners_access"]:
+                        final_fields[field_name] = (q_value.lower() == "yes")
+                    else:
+                        final_fields[field_name] = q_value
+
+            # Merge with any other fields from body.fields
+            final_fields = {**body.fields, **final_fields}
+            logger.info("jira: read ProForma form for epic %s", body.epic_key)
+        except Exception as e:
+            logger.warning("jira: ProForma read failed for epic %s, using workflow fields: %s", body.epic_key, e)
+            final_fields = body.fields
     else:
         final_fields = body.fields
 
@@ -645,19 +809,8 @@ def update_epic(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Jira epic update failed: {e}")
 
-    # Send ph.epic.updated CloudEvent to SonataFlow
-    project_id = final_fields.get("projectId", "unknown")
-    _send_cloud_event(
-        "ph.epic.updated",
-        project_id,
-        {
-            "epic_key": body.epic_key,
-            "updated": True
-        },
-        settings
-    )
-
-    return UpdateEpicResponse(epic_key=body.epic_key, updated=True)
+    jira_url = f"{settings.jira_url}/browse/{body.epic_key}"
+    return UpdateEpicResponse(epic_key=body.epic_key, jira_url=jira_url)
 
 
 def _lookup_jira_account_id(email: str, settings: Settings) -> dict | None:
@@ -1306,4 +1459,64 @@ def complete_task(
 
     closed = _transition_to_done(task["key"], settings)
     return {"closed": closed, "ticket_key": task["key"]}
+
+
+@router.get("/epic/{epic_key}/preintake-data", response_model=PreIntakeDataResponse)
+async def get_preintake_data(
+    epic_key: str,
+    settings: Settings = Depends(get_settings),
+    auth: tuple[str, int] = Depends(_require_auth),
+):
+    """Fetch pre-intake data from Jira ProForma form.
+    Returns structured onboarding fields for intake skill."""
+    owner, groups = auth
+    _require_group(groups, GROUP_BITS["rhdp-developers"], "rhdp-developers")
+
+    if not settings.jira_url or not settings.jira_email or not settings.jira_api_token:
+        raise HTTPException(status_code=503, detail="Jira not configured")
+
+    auth_str = base64.b64encode(f"{settings.jira_email}:{settings.jira_api_token}".encode()).decode()
+    headers = {
+        "Authorization": f"Basic {auth_str}",
+        "Content-Type": "application/json",
+    }
+
+    # Fetch ProForma form data
+    try:
+        req = urllib.request.Request(
+            f"{settings.jira_url.rstrip('/')}/rest/api/1/form/{epic_key}",
+            headers=headers,
+        )
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=15) as r:
+            form_data = json.loads(r.read().decode())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch ProForma form for epic {epic_key}: {e}")
+
+    # Parse form questions to extract field values
+    questions = form_data.get("questions", [])
+    field_map = {}
+    for q in questions:
+        q_id = q.get("id", "")
+        q_value = q.get("value", "")
+        field_map[q_id] = q_value
+
+    # Map ProForma fields to response
+    def bool_from_radio(value: str) -> bool:
+        return value.lower() == "yes"
+
+    return PreIntakeDataResponse(
+        epic_key=epic_key,
+        assetTitle=field_map.get("asset_title", ""),
+        projectDescription=field_map.get("project_description", ""),
+        contentOutline=field_map.get("content_outline", ""),
+        learningObjectives=field_map.get("learning_objectives", ""),
+        contentType=field_map.get("content_type", "lab"),
+        automationType=field_map.get("automation_type", "ansible"),
+        associatedOpportunities=field_map.get("associated_opportunities", ""),
+        salesPlayTdp=field_map.get("sales_play_tdp", ""),
+        aiRelated=bool_from_radio(field_map.get("ai_related", "no")),
+        gpuNeeded=bool_from_radio(field_map.get("gpu_needed", "no")),
+        maasInstead=bool_from_radio(field_map.get("maas_instead", "no")),
+        partnersAccess=bool_from_radio(field_map.get("partners_access", "no")),
+    )
 

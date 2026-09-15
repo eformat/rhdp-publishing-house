@@ -2,13 +2,18 @@
 import asyncio
 import json
 import logging
+import os
 import re
+import shutil
 import ssl
+import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import yaml
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -74,16 +79,16 @@ class PreIntakeUpdateRequest(BaseModel):
     tags: list[str] = None
 
 
-class CreateRepoRequest(BaseModel):
+class CreateCatalogRequest(BaseModel):
     project_id: str
     repo_owner: str = "rhpds"
-    template_repo: str = "https://github.com/rhpds/rhdp-publishing-house-template"
     collaborators: list[dict] = []
 
 
-class CreateRepoResponse(BaseModel):
+class CreateCatalogResponse(BaseModel):
     repo_url: str
     commit_hash: str
+    catalog_registered: bool
 
 
 class StartWorkflowRequest(BaseModel):
@@ -312,6 +317,13 @@ def get_workflow_data(project_id: str, auth: tuple[str, int] = Depends(_require_
 
 
 _STATE_MAP = {
+    "preintake": "pre_intake",
+    "preintakeinitialcomplete": "pre_intake",
+    "preintakeawaitupdate": "pre_intake",
+    "preintakereview": "pre_intake_review",
+    "preintakereviewdecision": "pre_intake_review",
+    "createepic": "pre_intake",
+    "updateepic": "intake",
     "intake": "intake",
     "contentreview": "content_review",
     "contentreviewdecision": "content_review",
@@ -496,8 +508,8 @@ async def start_workflow(
         "workflow_id": workflow_id,
     }
 
-    # Start SonataFlow workflow instance
-    workflow_url = f"{settings.sonataflow_url.rstrip('/')}/publishinghouseworkflow"
+    # Start SonataFlow workflow instance with businessKey
+    workflow_url = f"{settings.sonataflow_url.rstrip('/')}/publishinghouseworkflow?businessKey={project_name}"
     headers = {"Content-Type": "application/json"}
 
     req = urllib.request.Request(
@@ -945,7 +957,7 @@ async def preintake_review(
     body: PreIntakeRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
-    """Handle pre-intake review actions: approve, sendback, or reject."""
+    """Handle pre-intake review actions: approve, reject (send back for fixes), or cancel (terminate)."""
     owner, groups = auth
     # Require pre-intake reviewer or admin permissions
     _require_group(
@@ -959,16 +971,56 @@ async def preintake_review(
     if not wf_uuid:
         raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
 
-    _require_stage(wf_uuid, ["preintake_review"])
+    _require_stage(wf_uuid, ["pre_intake_review"])
 
     settings = get_settings()
     timestamp = datetime.now(timezone.utc).isoformat()
 
     # Validate action
-    if body.action not in ("approved", "sendback", "rejected"):
+    if body.action not in ("approved", "rejected", "cancelled"):
         raise HTTPException(status_code=400, detail=f"Invalid action: {body.action}")
 
-    # Build event data
+    # For rejection with notes, add them to workflow data (not CloudEvent)
+    if body.action == "rejected" and body.notes:
+        # Get FRESH notes via direct GraphQL query
+        query = """
+          query GetWorkflow($id: String!) {
+            ProcessInstances(where: { id: { equal: $id } }) {
+              id
+              variables
+            }
+          }
+        """
+        graphql_payload = json.dumps({"query": query, "variables": {"id": wf_uuid}}).encode()
+        graphql_req = urllib.request.Request(
+            f"{settings.sonataflow_graphql_url.rstrip('/')}/graphql",
+            data=graphql_payload,
+            headers={"Content-Type": "application/json"},
+        )
+
+        with urllib.request.urlopen(graphql_req, context=_SSL_CTX, timeout=30) as resp:
+            result_data = json.loads(resp.read().decode())
+            instances = result_data.get("data", {}).get("ProcessInstances", [])
+            if instances:
+                variables = instances[0].get("variables", {})
+                workflowdata = variables.get("workflowdata", {})
+                existing_notes = workflowdata.get("notes", [])
+            else:
+                existing_notes = []
+
+        rejection_notes = [
+            {
+                "text": body.notes,
+                "user": owner,
+                "stage": "pre_intake_review",
+                "timestamp": timestamp,
+                "type": "rejection"
+            }
+        ]
+        updated_notes = existing_notes + rejection_notes
+        _patch_workflow_data(wf_uuid, {"notes": updated_notes}, settings=settings)
+
+    # Build event data (without notes)
     event_data = {
         "user": owner,
         "stage": "preintake_review",
@@ -976,14 +1028,11 @@ async def preintake_review(
         "timestamp": timestamp,
     }
 
-    if body.notes:
-        event_data["notes"] = body.notes
-
     # Send appropriate CloudEvent
     event_type_map = {
-        "approved": "ph.preintake.approved",
-        "sendback": "ph.preintake.sendback",
-        "rejected": "ph.preintake.rejected",
+        "approved": "ph.preintake-review.approved",
+        "rejected": "ph.preintake-review.rejected",
+        "cancelled": "ph.preintake-review.cancelled",
     }
     event_type = event_type_map[body.action]
 
@@ -1004,7 +1053,7 @@ async def submit_preintake_update(
     body: PreIntakeUpdateRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
-    """Submit updated pre-intake fields after sendback.
+    """Submit updated pre-intake fields after rejection.
     Available to the project owner (developer) to make corrections."""
     owner, groups = auth
 
@@ -1013,7 +1062,7 @@ async def submit_preintake_update(
     if not wf_uuid:
         raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
 
-    _require_stage(wf_uuid, ["preintake_update"])
+    _require_stage(wf_uuid, ["pre_intake"])
 
     # Build updated fields dict (only include non-None values)
     updated_fields = {k: v for k, v in body.dict().items() if v is not None}
@@ -1024,16 +1073,15 @@ async def submit_preintake_update(
     settings = get_settings()
     timestamp = datetime.now(timezone.utc).isoformat()
 
-    # Send update submitted event with updated fields
-    event_data = {
-        "user": owner,
-        "timestamp": timestamp,
-        "updated_fields": updated_fields,
-    }
+    # Send preintake submitted event with updated fields
+    # Note: The fields go directly in event_data because eventDataFilter.toStateData
+    # will assign the entire data object to .updatedFields
+    event_data = updated_fields
 
-    _send_cloud_event("ph.preintake.update.submitted", slug, event_data)
+    _send_cloud_event("ph.preintake.submitted", slug, event_data)
 
-    logger.info("pre-intake update submitted by %s for %s with %d fields", owner, slug, len(updated_fields))
+    logger.info("pre-intake submitted by %s for %s with %d fields: %s", owner, slug, len(updated_fields), list(updated_fields.keys()))
+    logger.info("contentOutline value: %s", updated_fields.get('contentOutline', 'NOT IN FIELDS')[:200] if 'contentOutline' in updated_fields else 'NOT IN FIELDS')
 
     return PreIntakeResponse(
         status="success",
@@ -1044,25 +1092,31 @@ async def submit_preintake_update(
 
 # ── Repository Creation ─────────────────────────────────────────────────────
 
-@router.post("/create-repo", response_model=CreateRepoResponse)
-async def create_repo(
-    body: CreateRepoRequest,
+@router.post("/create-catalog", response_model=CreateCatalogResponse)
+async def create_catalog(
+    body: CreateCatalogRequest,
     _caller: str = Depends(_require_auth),
 ):
-    """Create GitHub repo from template and add collaborators.
-    Called by SonataFlow CreateRepo state after pre-intake approval."""
+    """Create GitHub repo from template, sync workflow metadata, and register Backstage catalog.
+    Called by SonataFlow CreateCatalog state after pre-intake approval."""
     settings = get_settings()
 
     if not settings.github_token:
         raise HTTPException(status_code=503, detail="GitHub token not configured")
 
-    # Parse template repo URL
-    template_url = body.template_repo.replace("https://github.com/", "").replace(".git", "")
+    # Parse template repo URL from config
+    template_url = settings.github_template_repo.replace("https://github.com/", "").replace(".git", "")
     template_parts = template_url.split("/")
     if len(template_parts) != 2:
-        raise HTTPException(status_code=400, detail=f"Invalid template_repo URL: {body.template_repo}")
+        raise HTTPException(status_code=500, detail=f"Invalid template_repo config: {settings.github_template_repo}")
 
     template_owner, template_name = template_parts
+
+    # Get workflow data for syncing
+    wd_result = _get_workflow_data(body.project_id)
+    workflow_id = wd_result.get("workflow_id", "")
+    epic_key = wd_result.get("epic_key", "")
+    jira_url = f"https://redhat.atlassian.net/browse/{epic_key}" if epic_key else ""
 
     # Create repo from template using GitHub API
     headers = {
@@ -1097,7 +1151,7 @@ async def create_repo(
     # Add collaborators
     for collab in body.collaborators:
         username = collab.get("user", "")
-        permission = collab.get("access", "push")  # push, pull, admin, maintain, triage
+        permission = collab.get("access", "push")
 
         collab_req = urllib.request.Request(
             f"https://api.github.com/repos/{repo_full_name}/collaborators/{username}",
@@ -1112,9 +1166,10 @@ async def create_repo(
         except Exception as e:
             logger.warning("github: failed to add collaborator %s to %s: %s", username, repo_full_name, e)
 
-    # Wait for repo initialization (check for default branch)
+    # Wait for repo initialization
     default_branch = "main"
     max_retries = 15
+    commit_hash = "unknown"
     for i in range(max_retries):
         try:
             branch_req = urllib.request.Request(
@@ -1128,24 +1183,114 @@ async def create_repo(
         except:
             if i < max_retries - 1:
                 await asyncio.sleep(2)
-            else:
-                commit_hash = "unknown"
 
-    logger.info("github: created repo %s from template %s", repo_full_name, body.template_repo)
+    logger.info("github: created repo %s from template %s", repo_full_name, settings.github_template_repo)
 
-    # Send ph.repo.created CloudEvent to SonataFlow
+    # Sync workflow metadata to the new repo
+    tmpdir = None
+    try:
+        tmpdir = tempfile.mkdtemp()
+        clone_url = f"https://x-access-token:{settings.github_token}@github.com/{repo_full_name}.git"
+
+        # Clone repo
+        subprocess.run(["git", "clone", clone_url, tmpdir], check=True, capture_output=True, timeout=60)
+
+        # Update publishing-house/spec.yaml
+        spec_path = os.path.join(tmpdir, "publishing-house", "spec.yaml")
+        if os.path.exists(spec_path):
+            with open(spec_path, "r") as f:
+                spec_data = yaml.safe_load(f)
+
+            if "project" not in spec_data:
+                spec_data["project"] = {}
+            spec_data["project"]["jira_ticket"] = epic_key
+            spec_data["project"]["workflow_id"] = workflow_id
+
+            with open(spec_path, "w") as f:
+                yaml.dump(spec_data, f, default_flow_style=False, sort_keys=False)
+
+        # Update catalog-info.yaml
+        catalog_path = os.path.join(tmpdir, "catalog-info.yaml")
+        if os.path.exists(catalog_path) and jira_url:
+            with open(catalog_path, "r") as f:
+                catalog_data = yaml.safe_load(f)
+
+            if "metadata" not in catalog_data:
+                catalog_data["metadata"] = {}
+            if "links" not in catalog_data["metadata"]:
+                catalog_data["metadata"]["links"] = []
+
+            # Add Jira link if not already present
+            jira_link = {"url": jira_url, "title": "Jira Epic", "icon": "bugs"}
+            if not any(link.get("url") == jira_url for link in catalog_data["metadata"]["links"]):
+                catalog_data["metadata"]["links"].append(jira_link)
+
+            with open(catalog_path, "w") as f:
+                yaml.dump(catalog_data, f, default_flow_style=False, sort_keys=False)
+
+        # Commit and push
+        subprocess.run(["git", "config", "user.email", "central-api@rhdp.io"], cwd=tmpdir, check=True, timeout=10)
+        subprocess.run(["git", "config", "user.name", "Central API"], cwd=tmpdir, check=True, timeout=10)
+        subprocess.run(["git", "add", "publishing-house/spec.yaml", "catalog-info.yaml"], cwd=tmpdir, check=True, timeout=10)
+        subprocess.run(["git", "commit", "-m", "feat: sync workflow metadata from Central API"], cwd=tmpdir, check=True, timeout=10)
+        subprocess.run(["git", "push"], cwd=tmpdir, check=True, timeout=60)
+
+        logger.info("github: synced workflow metadata to %s", repo_full_name)
+
+        # Get new commit hash after sync
+        branch_req = urllib.request.Request(
+            f"https://api.github.com/repos/{repo_full_name}/git/ref/heads/{default_branch}",
+            headers=headers,
+        )
+        with urllib.request.urlopen(branch_req, timeout=10) as r:
+            ref_data = json.loads(r.read().decode())
+            commit_hash = ref_data["object"]["sha"]
+
+    except Exception as e:
+        logger.error("github: failed to sync metadata to %s: %s", repo_full_name, e)
+        # Continue - repo is created even if sync fails
+    finally:
+        if tmpdir and os.path.exists(tmpdir):
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # Register with Backstage catalog
+    catalog_registered = False
+    try:
+        if settings.rhdh_service_token and settings.rhdh_internal_url:
+            catalog_entity_url = f"{repo_url}/blob/{default_branch}/catalog-info.yaml"
+            catalog_req = urllib.request.Request(
+                f"{settings.rhdh_internal_url.rstrip('/')}/api/catalog/locations",
+                data=json.dumps({
+                    "type": "url",
+                    "target": catalog_entity_url
+                }).encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {settings.rhdh_service_token}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(catalog_req, timeout=15) as r:
+                catalog_registered = True
+                logger.info("backstage: registered catalog entity for %s", body.project_id)
+    except Exception as e:
+        logger.warning("backstage: failed to register catalog entity for %s: %s", body.project_id, e)
+
+    # Send ph.catalog.created CloudEvent to SonataFlow
     _send_cloud_event(
-        "ph.repo.created",
+        "ph.catalog.created",
         body.project_id,
         {
             "repo_url": repo_url,
-            "commit_hash": commit_hash
+            "commit_hash": commit_hash,
+            "catalog_registered": catalog_registered,
         }
     )
 
-    return CreateRepoResponse(
+    return CreateCatalogResponse(
         repo_url=repo_url,
-        commit_hash=commit_hash
+        commit_hash=commit_hash,
+        catalog_registered=catalog_registered,
     )
 
 

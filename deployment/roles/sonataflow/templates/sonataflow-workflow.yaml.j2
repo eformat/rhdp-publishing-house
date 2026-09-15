@@ -77,51 +77,37 @@ spec:
           - contextAttributeName: projectid
         dataOnly: true
         kind: consumed
-        name: PreIntakeApprovedEvent
+        name: PreIntakeReviewApprovedEvent
         source: publishing-house
-        type: ph.preintake.approved
+        type: ph.preintake-review.approved
       - correlation:
           - contextAttributeName: projectid
         dataOnly: true
         kind: consumed
-        name: PreIntakeSendBackEvent
+        name: PreIntakeReviewRejectedEvent
         source: publishing-house
-        type: ph.preintake.sendback
+        type: ph.preintake-review.rejected
       - correlation:
           - contextAttributeName: projectid
         dataOnly: true
         kind: consumed
-        name: PreIntakeRejectedEvent
+        name: PreIntakeReviewCancelledEvent
         source: publishing-house
-        type: ph.preintake.rejected
+        type: ph.preintake-review.cancelled
       - correlation:
           - contextAttributeName: projectid
         dataOnly: true
         kind: consumed
-        name: PreIntakeUpdateSubmittedEvent
+        name: PreIntakeSubmittedEvent
         source: publishing-house
-        type: ph.preintake.update.submitted
+        type: ph.preintake.submitted
       - correlation:
           - contextAttributeName: projectid
         dataOnly: true
         kind: consumed
-        name: EpicCreatedEvent
+        name: CatalogCreatedEvent
         source: publishing-house
-        type: ph.epic.created
-      - correlation:
-          - contextAttributeName: projectid
-        dataOnly: true
-        kind: consumed
-        name: EpicUpdatedEvent
-        source: publishing-house
-        type: ph.epic.updated
-      - correlation:
-          - contextAttributeName: projectid
-        dataOnly: true
-        kind: consumed
-        name: RepoCreatedEvent
-        source: publishing-house
-        type: ph.repo.created
+        type: ph.catalog.created
     functions:
       - name: printMessage
         operation: sysout
@@ -135,8 +121,8 @@ spec:
       - name: updatejiraepic
         operation: specs/central-api.yaml#updateJiraEpic
         type: rest
-      - name: createrepo
-        operation: specs/central-api.yaml#createRepo
+      - name: createcatalog
+        operation: specs/central-api.yaml#createCatalog
         type: rest
     start:
       stateName: Init
@@ -206,33 +192,67 @@ spec:
               arguments:
                 epic_type: .deploymentMode
                 fields: .
-        transition:
-          nextState: WaitForEpic
-      - name: WaitForEpic
-        type: event
-        exclusive: true
-        onEvents:
-          - eventRefs:
-              - EpicCreatedEvent
-            eventDataFilter:
-              toStateData: ".epicData"
-        timeouts:
-          stateExecTimeout: PT30S
+            actionDataFilter:
+              toStateData: .epicResponse
         stateDataFilter:
           output: |
             . + {
-              epic_key: (.epicData.epic_key // ""),
-              jira_url: (.epicData.jira_url // ""),
-              proforma_form_id: (.epicData.proforma_form_id // "")
-            } | del(.epicData)
+              epic_key: (
+                if .epicResponse
+                then .epicResponse.epic_key
+                else ""
+                end
+              ),
+              jira_url: (
+                if .epicResponse
+                then .epicResponse.jira_url
+                else ""
+                end
+              ),
+              proforma_form_id: (
+                if .epicResponse
+                then .epicResponse.proforma_form_id
+                else ""
+                end
+              )
+            } | del(.epicResponse)
         transition:
-          nextState: PreIntakeUpdate
-      - name: PreIntakeUpdate
+          nextState: PreIntake
+      - name: PreIntake
+        type: switch
+        dataConditions:
+          - name: FirstTime
+            condition: "${ (.reviewHistory // []) | map(select(.stage == \"preintake\")) | length == 0 }"
+            transition:
+              nextState: PreIntakeInitialComplete
+          - name: NeedsUpdate
+            condition: "${ .rejection.isRejected == true }"
+            transition:
+              nextState: PreIntakeAwaitUpdate
+        defaultCondition:
+          transition:
+            nextState: PreIntakeReview
+      - name: PreIntakeInitialComplete
+        type: inject
+        data: {}
+        stateDataFilter:
+          output: |
+            . + {
+              reviewHistory: ((.reviewHistory // []) + [{
+                stage: "pre_intake",
+                action: "completed",
+                timestamp: (now | tostring),
+                user: .ssoEmail
+              }])
+            }
+        transition:
+          nextState: PreIntakeReview
+      - name: PreIntakeAwaitUpdate
         type: event
         exclusive: true
         onEvents:
           - eventRefs:
-              - PreIntakeUpdateSubmittedEvent
+              - PreIntakeSubmittedEvent
             eventDataFilter:
               toStateData: ".updatedFields"
         stateDataFilter:
@@ -240,19 +260,19 @@ spec:
             . + {
               updatedFields: null,
               reviewHistory: ((.reviewHistory // []) + [{
-                stage: "preintake_update",
+                stage: "pre_intake",
                 action: "submitted",
                 timestamp: (now | tostring),
-                user: .ssoUser
+                user: .ssoEmail
               }])
             }
           output: |
             . + (.updatedFields // {}) + {
               reviewHistory: ((.reviewHistory // []) + [{
-                stage: "preintake_update",
+                stage: "pre_intake",
                 action: "completed",
                 timestamp: (now | tostring),
-                user: .ssoUser
+                user: .ssoEmail
               }])
             } | del(.updatedFields)
         transition:
@@ -262,15 +282,15 @@ spec:
         exclusive: true
         onEvents:
           - eventRefs:
-              - PreIntakeApprovedEvent
+              - PreIntakeReviewApprovedEvent
             eventDataFilter:
               toStateData: ".reviewAction"
           - eventRefs:
-              - PreIntakeSendBackEvent
+              - PreIntakeReviewRejectedEvent
             eventDataFilter:
               toStateData: ".reviewAction"
           - eventRefs:
-              - PreIntakeRejectedEvent
+              - PreIntakeReviewCancelledEvent
             eventDataFilter:
               toStateData: ".reviewAction"
         timeouts:
@@ -280,7 +300,7 @@ spec:
             . + {
               reviewAction: null,
               reviewHistory: ((.reviewHistory // []) + [{
-                stage: "preintake_review",
+                stage: "pre_intake_review",
                 action: "started",
                 timestamp: (now | tostring),
                 user: "system"
@@ -298,7 +318,7 @@ spec:
                   timestamp: .reviewAction.timestamp,
                   reasons: (.reviewAction.reasons // [])
                 }
-                else { isRejected: false }
+                else (.rejection + { isRejected: false, reasons: [(.rejection.reasons // [])[] | . + {resolved: true}] })
                 end
               )
             } | del(.reviewAction)
@@ -307,17 +327,17 @@ spec:
       - name: PreIntakeReviewDecision
         type: switch
         dataConditions:
+          - name: Cancelled
+            condition: |
+              ${
+                (.reviewHistory // [])[-1].action == "cancelled"
+              }
+            transition:
+              nextState: Rejected
           - name: Rejected
             condition: "${ .rejection.isRejected == true }"
             transition:
-              nextState: Rejected
-          - name: SendBack
-            condition: |
-              ${
-                (.reviewHistory // [])[-1].action == "sendback"
-              }
-            transition:
-              nextState: PreIntakeUpdate
+              nextState: PreIntake
         defaultCondition:
           transition:
             nextState: UpdateEpic
@@ -332,47 +352,38 @@ spec:
                 epic_key: .epic_key
                 epic_type: .deploymentMode
                 proforma_form_id: (.proforma_form_id // "")
+                fields: .
         transition:
-          nextState: WaitForEpicUpdate
-      - name: WaitForEpicUpdate
-        type: event
-        exclusive: true
-        onEvents:
-          - eventRefs:
-              - EpicUpdatedEvent
-        timeouts:
-          stateExecTimeout: PT30S
-        transition:
-          nextState: CreateRepo
-      - name: CreateRepo
+          nextState: CreateCatalog
+      - name: CreateCatalog
         type: operation
         actions:
-          - name: CreateGitHubRepo
+          - name: CreateGitHubRepoAndCatalog
             functionRef:
-              refName: createrepo
+              refName: createcatalog
               arguments:
                 project_id: .projectId
                 repo_owner: "rhpds"
-                template_repo: "https://github.com/rhpds/rhdp-publishing-house-template"
                 collaborators: (.teamMembers // [])
         transition:
-          nextState: WaitForRepo
-      - name: WaitForRepo
+          nextState: WaitForCatalog
+      - name: WaitForCatalog
         type: event
         exclusive: true
         onEvents:
           - eventRefs:
-              - RepoCreatedEvent
+              - CatalogCreatedEvent
             eventDataFilter:
-              toStateData: ".repoData"
+              toStateData: ".catalogData"
         timeouts:
           stateExecTimeout: PT60S
         stateDataFilter:
           output: |
             . + {
-              repoUrl: (.repoData.repoUrl // ""),
-              commitHash: (.repoData.commitHash // "")
-            } | del(.repoData)
+              repoUrl: (.catalogData.repoUrl // ""),
+              commitHash: (.catalogData.commitHash // ""),
+              catalogRegistered: (.catalogData.catalogRegistered // false)
+            } | del(.catalogData)
         transition:
           nextState: Intake
       - name: Rejected

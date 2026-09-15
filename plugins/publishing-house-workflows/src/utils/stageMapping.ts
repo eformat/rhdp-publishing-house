@@ -1,13 +1,13 @@
 import { WorkflowNode, WorkflowStage } from '../api/types';
 
 const STATE_MAP: Record<string, WorkflowStage> = {
-  preintakeupdate: 'pre_intake_update',
+  preintake: 'pre_intake',
+  preintakeinitialcomplete: 'pre_intake',
+  preintakeawaitupdate: 'pre_intake',
   preintakereview: 'pre_intake_review',
   preintakereviewdecision: 'pre_intake_review',
-  createepic: 'pre_intake_review',
-  waitforepic: 'pre_intake_review',
+  createepic: 'pre_intake',
   updateepic: 'intake',
-  waitforepicupdate: 'intake',
   createrepo: 'intake',
   waitforrepo: 'intake',
   intake: 'intake',
@@ -45,7 +45,7 @@ export function deriveStage(
 }
 
 export const STAGE_ORDER: WorkflowStage[] = [
-  'pre_intake_update',
+  'pre_intake',
   'pre_intake_review',
   'intake',
   'content_review',
@@ -59,7 +59,7 @@ export const STAGE_ORDER: WorkflowStage[] = [
 export const STAGE_LABELS: Record<WorkflowStage, string> = {
   init: 'Init',
   setup: 'Setup',
-  pre_intake_update: 'Pre-Intake Update',
+  pre_intake: 'Pre-Intake',
   pre_intake_review: 'Pre-Intake Review',
   intake: 'Intake',
   review: 'Reviews',
@@ -74,8 +74,8 @@ export const STAGE_LABELS: Record<WorkflowStage, string> = {
 };
 
 export const STAGE_DESCRIPTIONS: Record<string, string> = {
-  pre_intake_update: 'The project author is updating onboarding details after pre-intake review feedback.',
-  pre_intake_review: 'Initial onboarding request is under review. Reviewer will approve, send back for updates, or reject.',
+  pre_intake: 'Onboarding details submission. Completed on first run, active when updates are needed after rejection.',
+  pre_intake_review: 'Initial onboarding request is under review. Reviewer will approve, reject (send back for updates), or cancel (terminate).',
   intake: 'The project spec, design document, and module outlines are being authored via the intake skill.',
   content_review: 'The design spec and module outlines are being reviewed for completeness and accuracy. A reviewer must approve or reject before proceeding.',
   infra_review: 'Infrastructure requirements (cluster type, sizing, workloads) are being reviewed. A reviewer must approve or reject before proceeding.',
