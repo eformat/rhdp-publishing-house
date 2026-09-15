@@ -135,10 +135,10 @@ spec:
           ui:help: Use lowercase letters, numbers, and hyphens only
 
         github_users:
-          title: Team Members
+          title: GitHub Collaborators
           type: array
-          minItems: 1
-          ui:help: "First entry is the project owner. Additional collaborators are optional."
+          minItems: 0
+          ui:help: "Add GitHub usernames for collaborators (optional). Your account is added automatically as owner."
           ui:options:
             addable: true
             orderable: false
@@ -147,20 +147,16 @@ spec:
             type: object
             required:
               - user
-              - email
             properties:
               user:
                 title: GitHub Username
                 type: string
-                ui:placeholder: "your-github-id"
-              email:
-                title: Red Hat Email
-                type: string
-                ui:placeholder: "user@redhat.com"
+                ui:placeholder: "github-username"
               access:
                 title: Access
                 type: string
-                default: write
+                default: push
+                enum: ["push", "pull", "admin", "maintain", "triage"]
                 ui:widget: hidden
 
         tags:

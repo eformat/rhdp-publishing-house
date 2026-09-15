@@ -219,7 +219,7 @@ def _format_onboarded_epic(fields: dict) -> tuple[str, dict]:
     team_members = fields.get("teamMembers", [])
     if team_members:
         content.append(_build_adf_paragraph([_build_adf_text("Collaborators:", strong=True)]))
-        collab_items = [f"{m.get('user', '')} ({m.get('email', '')})" for m in team_members]
+        collab_items = [f"@{m.get('user', '')}" for m in team_members if m.get('user')]
         content.append(_build_adf_bullet_list(collab_items))
 
     # Technical Details
@@ -358,7 +358,7 @@ def _format_field_source_epic(fields: dict) -> tuple[str, dict]:
     team_members = fields.get("teamMembers", [])
     if team_members:
         content.append(_build_adf_paragraph([_build_adf_text("Collaborators:", strong=True)]))
-        collab_items = [f"{m.get('user', '')} ({m.get('email', '')})" for m in team_members]
+        collab_items = [f"@{m.get('user', '')}" for m in team_members if m.get('user')]
         content.append(_build_adf_bullet_list(collab_items))
 
     # Automation
