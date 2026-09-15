@@ -85,31 +85,34 @@ spec:
           type: boolean
           default: false
 
-        gpu_needed:
-          title: Do you need direct GPU access?
-          type: boolean
-          default: false
-          ui:help: Check if GPU hardware is required
-          dependencies:
-            ai_related:
-              oneOf:
-                - properties:
-                    ai_related:
-                      const: true
-
-        maas_instead:
-          title: Can you use MaaS instead?
-          type: boolean
-          default: false
-          ui:help: Check if Model-as-a-Service can substitute for GPU
-          dependencies:
-            gpu_needed:
-              oneOf:
-                - properties:
-                    ai_related:
-                      const: true
-                    gpu_needed:
-                      const: true
+      dependencies:
+        ai_related:
+          oneOf:
+            - properties:
+                ai_related:
+                  const: false
+            - properties:
+                ai_related:
+                  const: true
+                gpu_needed:
+                  title: Do you need direct GPU access?
+                  type: boolean
+                  default: false
+                  ui:help: Check if GPU hardware is required
+              dependencies:
+                gpu_needed:
+                  oneOf:
+                    - properties:
+                        gpu_needed:
+                          const: false
+                    - properties:
+                        gpu_needed:
+                          const: true
+                        maas_instead:
+                          title: Can you use MaaS instead?
+                          type: boolean
+                          default: false
+                          ui:help: Check if Model-as-a-Service can substitute for GPU
 
         partners_access:
           title: Should it be available to Partners?
