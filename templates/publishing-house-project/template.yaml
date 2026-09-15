@@ -103,13 +103,13 @@ spec:
           default: false
           ui:help: Check if Model-as-a-Service can substitute for GPU
           dependencies:
-            ai_related:
+            gpu_needed:
               oneOf:
                 - properties:
                     ai_related:
                       const: true
                     gpu_needed:
-                      const: false
+                      const: true
 
         partners_access:
           title: Should it be available to Partners?
