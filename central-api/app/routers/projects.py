@@ -80,7 +80,6 @@ class PreIntakeUpdateRequest(BaseModel):
 
 
 class CreateCatalogRequest(BaseModel):
-    project_id: str
     repo_owner: str = "rhpds"
     collaborators: list[dict] = []
 
@@ -1092,9 +1091,10 @@ async def submit_preintake_update(
 
 # ── Repository Creation ─────────────────────────────────────────────────────
 
-@router.post("/create-catalog", response_model=CreateCatalogResponse)
+@router.post("/{project_id}/create-catalog", response_model=CreateCatalogResponse)
 async def create_catalog(
-    body: CreateCatalogRequest,
+    project_id: str,
+    body: CreateCatalogRequest = CreateCatalogRequest(),
     _caller: str = Depends(_require_auth),
 ):
     """Create GitHub repo from template, sync workflow metadata, and register Backstage catalog.
@@ -1113,7 +1113,7 @@ async def create_catalog(
     template_owner, template_name = template_parts
 
     # Get workflow data for syncing
-    wd_result = _get_workflow_data(body.project_id)
+    wd_result = _get_workflow_data(project_id)
     workflow_id = wd_result.get("workflow_id", "")
     epic_key = wd_result.get("epic_key", "")
     jira_url = f"https://redhat.atlassian.net/browse/{epic_key}" if epic_key else ""
@@ -1127,8 +1127,8 @@ async def create_catalog(
 
     create_payload = {
         "owner": body.repo_owner,
-        "name": body.project_id,
-        "description": f"https://rhpds.github.io/{body.project_id}",
+        "name": project_id,
+        "description": f"https://rhpds.github.io/{project_id}",
         "include_all_branches": False,
         "private": False,
     }
@@ -1202,7 +1202,7 @@ async def create_catalog(
 
         # Build template context from workflow data
         template_values = {
-            "project_name": body.project_id,
+            "project_name": project_id,
             "user_email": wf_data.get("ssoEmail", ""),
             "github_user": wf_data.get("ssoUser", ""),
             "project_description": wf_data.get("projectDescription", ""),
@@ -1312,14 +1312,14 @@ async def create_catalog(
             )
             with urllib.request.urlopen(catalog_req, timeout=15) as r:
                 catalog_registered = True
-                logger.info("backstage: registered catalog entity for %s", body.project_id)
+                logger.info("backstage: registered catalog entity for %s", project_id)
     except Exception as e:
-        logger.warning("backstage: failed to register catalog entity for %s: %s", body.project_id, e)
+        logger.warning("backstage: failed to register catalog entity for %s: %s", project_id, e)
 
     # Send ph.catalog.created CloudEvent to SonataFlow
     _send_cloud_event(
         "ph.catalog.created",
-        body.project_id,
+        project_id,
         {
             "repo_url": repo_url,
             "commit_hash": commit_hash,
