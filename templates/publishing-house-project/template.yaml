@@ -85,6 +85,12 @@ spec:
           type: boolean
           default: false
 
+        partners_access:
+          title: Should it be available to Partners?
+          type: boolean
+          default: false
+          ui:help: Check if this content should be accessible to Red Hat partners
+
       dependencies:
         ai_related:
           oneOf:
@@ -113,12 +119,6 @@ spec:
                           type: boolean
                           default: false
                           ui:help: Check if Model-as-a-Service can substitute for GPU
-
-        partners_access:
-          title: Should it be available to Partners?
-          type: boolean
-          default: false
-          ui:help: Check if this content should be accessible to Red Hat partners
 
     - title: Project Setup
       required:
