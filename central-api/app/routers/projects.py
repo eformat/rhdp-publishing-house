@@ -1186,16 +1186,64 @@ async def create_catalog(
 
     logger.info("github: created repo %s from template %s", repo_full_name, settings.github_template_repo)
 
-    # Sync workflow metadata to the new repo
+    # Render Jinja templates and sync workflow metadata
     tmpdir = None
     try:
+        from jinja2 import Template
+
         tmpdir = tempfile.mkdtemp()
         clone_url = f"https://x-access-token:{settings.github_token}@github.com/{repo_full_name}.git"
 
         # Clone repo
         subprocess.run(["git", "clone", clone_url, tmpdir], check=True, capture_output=True, timeout=60)
 
-        # Update publishing-house/spec.yaml
+        # Get full workflow data for template rendering
+        wf_data = _get_graphql_workflow(workflow_id, settings)
+
+        # Derive cluster apps domain from RCARS URL
+        apps_domain = "apps.ocpv-infra01.dal12.infra.demo.redhat.com"  # default
+        if settings.rcars_url:
+            # Extract domain from https://rcars-api.apps.ocpv-infra01.dal12.infra.demo.redhat.com
+            rcars_parts = settings.rcars_url.replace("https://", "").replace("http://", "").split(".")
+            if len(rcars_parts) > 1:
+                apps_domain = ".".join(rcars_parts[1:])  # Skip first subdomain
+
+        # Build template context from workflow data
+        template_values = {
+            "project_name": body.project_id,
+            "user_email": wf_data.get("ssoEmail", ""),
+            "github_user": wf_data.get("ssoUser", ""),
+            "project_description": wf_data.get("projectDescription", ""),
+            "content_type": wf_data.get("contentType", "lab"),
+            "deployment_mode": "rhdp_published",
+            "initiative_key": wf_data.get("initiativeKey", "rh1_2027"),
+            "showroom_type": wf_data.get("showroomType", "classic"),
+            "intake_type": wf_data.get("intakeType", "new"),
+            "automation_type": wf_data.get("automationType", "ansible"),
+            "repo_url": f"https://github.com/{repo_full_name}",
+            "devspaces_url": f"https://devspaces.{apps_domain}",
+            "central_api_url": f"https://central-api-publishing-house.{apps_domain}",
+        }
+
+        # Render Jinja templates in place (catalog-info.yaml and spec.yaml)
+        template_files = [
+            os.path.join(tmpdir, "catalog-info.yaml"),
+            os.path.join(tmpdir, "publishing-house", "spec.yaml"),
+        ]
+
+        for template_file in template_files:
+            if os.path.exists(template_file):
+                with open(template_file, 'r') as f:
+                    content = f.read()
+
+                # Render Jinja template
+                template = Template(content)
+                rendered = template.render(values=template_values)
+
+                with open(template_file, 'w') as f:
+                    f.write(rendered)
+
+        # Update spec.yaml with workflow metadata
         spec_path = os.path.join(tmpdir, "publishing-house", "spec.yaml")
         if os.path.exists(spec_path):
             with open(spec_path, "r") as f:
@@ -1209,7 +1257,7 @@ async def create_catalog(
             with open(spec_path, "w") as f:
                 yaml.dump(spec_data, f, default_flow_style=False, sort_keys=False)
 
-        # Update catalog-info.yaml
+        # Update catalog-info.yaml with Jira link
         catalog_path = os.path.join(tmpdir, "catalog-info.yaml")
         if os.path.exists(catalog_path) and jira_url:
             with open(catalog_path, "r") as f:
@@ -1231,8 +1279,8 @@ async def create_catalog(
         # Commit and push
         subprocess.run(["git", "config", "user.email", "central-api@rhdp.io"], cwd=tmpdir, check=True, timeout=10)
         subprocess.run(["git", "config", "user.name", "Central API"], cwd=tmpdir, check=True, timeout=10)
-        subprocess.run(["git", "add", "publishing-house/spec.yaml", "catalog-info.yaml"], cwd=tmpdir, check=True, timeout=10)
-        subprocess.run(["git", "commit", "-m", "feat: sync workflow metadata from Central API"], cwd=tmpdir, check=True, timeout=10)
+        subprocess.run(["git", "add", "catalog-info.yaml", "publishing-house/spec.yaml"], cwd=tmpdir, check=True, timeout=10)
+        subprocess.run(["git", "commit", "-m", "feat: render templates and sync workflow metadata"], cwd=tmpdir, check=True, timeout=10)
         subprocess.run(["git", "push"], cwd=tmpdir, check=True, timeout=60)
 
         logger.info("github: synced workflow metadata to %s", repo_full_name)
