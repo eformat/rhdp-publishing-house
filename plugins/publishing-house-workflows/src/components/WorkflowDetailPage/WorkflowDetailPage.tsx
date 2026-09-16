@@ -311,7 +311,7 @@ export function WorkflowDetailPage() {
         message: `${STAGE_LABELS[stage]} approved — waiting for workflow to advance...`,
       });
       const prevStage = result.summary.stage;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         const updated = await client.getWorkflow(result.summary.projectId);
         if (updated && updated.summary.stage !== prevStage) break;
@@ -351,7 +351,7 @@ export function WorkflowDetailPage() {
         message: `${STAGE_LABELS[rejectingStage]} rejected — waiting for workflow to transition...`,
       });
       const prevStage = result.summary.stage;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         const updated = await client.getWorkflow(result.summary.projectId);
         if (updated && updated.summary.stage !== prevStage) break;
@@ -399,7 +399,7 @@ export function WorkflowDetailPage() {
           message: `Pre-intake ${action} — waiting for workflow to advance...`,
         });
         const prevStage = result.summary.stage;
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0; i < 12; i++) {
           await new Promise(resolve => setTimeout(resolve, 5000));
           const updated = await client.getWorkflow(result.summary.projectId);
           if (updated && updated.summary.stage !== prevStage) break;
@@ -428,7 +428,7 @@ export function WorkflowDetailPage() {
         message: 'Pre-intake update submitted — waiting for workflow to advance...',
       });
       const prevStage = result.summary.stage;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         const updated = await client.getWorkflow(result.summary.projectId);
         if (updated && updated.summary.stage !== prevStage) break;
@@ -468,7 +468,7 @@ export function WorkflowDetailPage() {
       await client.submitEnvSetup(result.summary.projectId, filteredAgv, filteredCi);
       setSnackbar({ open: true, severity: 'success', message: 'Env setup info submitted — waiting for workflow to advance...' });
       const prevStage = result.summary.stage;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         const updated = await client.getWorkflow(result.summary.projectId);
         if (updated && updated.summary.stage !== prevStage) break;
