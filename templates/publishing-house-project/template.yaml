@@ -137,8 +137,8 @@ spec:
         github_users:
           title: GitHub Collaborators
           type: array
-          minItems: 0
-          ui:help: "Add GitHub usernames for collaborators (optional). Your account is added automatically as owner."
+          minItems: 1
+          ui:help: "Add GitHub usernames for collaborators (at least one required). Your account is added automatically as owner."
           ui:options:
             addable: true
             orderable: false
