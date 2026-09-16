@@ -486,7 +486,7 @@ spec:
         dataConditions:
           - condition: "${ .rejection.isRejected == true }"
             transition:
-              nextState: ContentReview
+              nextState: Intake
           - condition: "${ .showroomType == \"zero_touch\" }"
             transition:
               nextState: JiraSyncIntake

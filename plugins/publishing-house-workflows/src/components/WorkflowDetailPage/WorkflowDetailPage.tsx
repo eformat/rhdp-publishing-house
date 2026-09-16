@@ -69,7 +69,7 @@ const EXPECTED_NEXT_STAGES: Record<string, WorkflowStage[]> = {
   pre_intake_review: ['pre_intake', 'intake'],  // Rejected → PreIntake, Approved → Intake
   intake: ['content_review'],                   // Intake → ContentReview
   content_review: ['intake', 'infra_review'],   // Rejected → Intake, Approved → InfraReview
-  infra_review: ['content_review', 'env_setup', 'development'], // Rejected → ContentReview, Approved → EnvSetup or Development
+  infra_review: ['intake', 'env_setup', 'development'], // Rejected → Intake, Approved → EnvSetup or Development
   env_setup: ['development'],                   // EnvSetup → Development
   development: ['testing'],                     // Development → Testing
   testing: ['published'],                       // Testing → Published
