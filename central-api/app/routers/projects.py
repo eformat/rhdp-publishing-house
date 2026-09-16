@@ -945,7 +945,6 @@ class StartRequest(BaseModel):
     content_type: str = ""
     tags: list[str] = []
     project_description: str = ""
-    audit_trail_sha: str = ""
     sso_user: str = ""
     sso_email: str = ""
     showroom_type: str = ""
@@ -1943,8 +1942,6 @@ async def start_workflow(
         wd["tags"] = body.tags
     if body.project_description:
         wd["projectDescription"] = body.project_description
-    if body.audit_trail_sha:
-        wd["auditTrailSha"] = body.audit_trail_sha
     if body.showroom_type:
         wd["showroomType"] = body.showroom_type
     wd["intakeType"] = body.intake_type

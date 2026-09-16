@@ -1719,8 +1719,11 @@ export function WorkflowDetailPage() {
                 {wd?.baselineSha && (
                   <DetailField label="Baseline Commit" value={wd.baselineSha.substring(0, 7)} />
                 )}
-                {wd?.auditTrailSha && (
-                  <DetailField label="Last Known Commit" value={wd.auditTrailSha.substring(0, 7)} />
+                {reviewHistory.length > 0 && reviewHistory[reviewHistory.length - 1].commitSha && (
+                  <DetailField
+                    label="Last Known Commit"
+                    value={reviewHistory[reviewHistory.length - 1].commitSha!.substring(0, 7)}
+                  />
                 )}
               </Grid>
             </Grid>
