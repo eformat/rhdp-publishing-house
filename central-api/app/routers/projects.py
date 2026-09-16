@@ -1220,7 +1220,7 @@ async def create_catalog(
     # Render Jinja templates and sync workflow metadata
     tmpdir = None
     try:
-        from jinja2 import Template
+        from jinja2 import Environment
 
         tmpdir = tempfile.mkdtemp()
         clone_url = f"https://x-access-token:{settings.github_token}@github.com/{repo_full_name}.git"
@@ -1254,13 +1254,19 @@ async def create_catalog(
             os.path.join(tmpdir, "publishing-house", "spec.yaml"),
         ]
 
+        # Create Jinja environment with ${{ }} delimiters (Backstage scaffolder syntax)
+        jinja_env = Environment(
+            variable_start_string='${{',
+            variable_end_string='}}'
+        )
+
         for template_file in template_files:
             if os.path.exists(template_file):
                 with open(template_file, 'r') as f:
                     content = f.read()
 
-                # Render Jinja template
-                template = Template(content)
+                # Render template with custom delimiters
+                template = jinja_env.from_string(content)
                 rendered = template.render(values=template_values)
 
                 with open(template_file, 'w') as f:
