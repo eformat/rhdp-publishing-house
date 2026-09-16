@@ -52,18 +52,7 @@ class UpdateEpicResponse(BaseModel):
 
 class PreIntakeDataResponse(BaseModel):
     epic_key: str
-    assetTitle: str
-    projectDescription: str
-    contentOutline: str
-    learningObjectives: str
-    contentType: str
-    automationType: str
-    associatedOpportunities: str = ""
-    salesPlayTdp: str = ""
-    aiRelated: bool = False
-    gpuNeeded: bool = False
-    maasInstead: bool = False
-    partnersAccess: bool = False
+    description: str
 
 
 
@@ -694,14 +683,8 @@ def create_epic(
             points=POINTS.get(ft["id"]),
         )
 
-    # Create ProForma form for rhdp_published epics only (pre-intake onboarding)
-    proforma_form_id = ""
-    if body.epic_type == "rhdp_published":
-        try:
-            proforma_form_id = _create_proforma_form(epic_key, body.epic_type, body.fields, settings)
-        except Exception as e:
-            logger.warning("jira: ProForma form creation failed for epic %s: %s", epic_key, e)
-
+    # ProForma form creation removed - all fields stored in epic description
+    # Description format is driven by epic_type (onboarded vs field_source)
     jira_url = f"{settings.jira_url}/browse/{epic_key}"
     project_id = body.fields.get("projectId", "unknown")
     logger.info("jira: created epic %s for project %s", epic_key, project_id)
@@ -709,7 +692,7 @@ def create_epic(
     return CreateEpicResponse(
         epic_key=epic_key,
         jira_url=jira_url,
-        proforma_form_id=proforma_form_id
+        proforma_form_id=""
     )
 
 
@@ -725,62 +708,8 @@ def update_epic(
     if not settings.jira_url:
         raise HTTPException(status_code=503, detail="Jira not configured")
 
-    # Get final field values (from ProForma or workflow)
-    if body.proforma_form_id and body.epic_type == "rhdp_published":
-        # Read current values from ProForma form
-        try:
-            auth_str = base64.b64encode(f"{settings.jira_email}:{settings.jira_api_token}".encode()).decode()
-            headers = {
-                "Authorization": f"Basic {auth_str}",
-                "Content-Type": "application/json",
-            }
-
-            req = urllib.request.Request(
-                f"{settings.jira_url.rstrip('/')}/rest/api/1/form/{body.epic_key}",
-                headers=headers,
-            )
-            with urllib.request.urlopen(req, context=_SSL_CTX, timeout=15) as r:
-                form_data = json.loads(r.read().decode())
-
-            # Extract values from form questions
-            questions = form_data.get("questions", [])
-            final_fields = {}
-            for q in questions:
-                q_id = q.get("id", "")
-                q_value = q.get("value", "")
-
-                # Map ProForma field IDs back to field names
-                field_mapping = {
-                    "asset_title": "assetTitle",
-                    "project_description": "projectDescription",
-                    "content_outline": "contentOutline",
-                    "learning_objectives": "learningObjectives",
-                    "content_type": "contentType",
-                    "automation_type": "automationType",
-                    "associated_opportunities": "associatedOpportunities",
-                    "sales_play_tdp": "salesPlayTdp",
-                    "ai_related": "aiRelated",
-                    "gpu_needed": "gpuNeeded",
-                    "maas_instead": "maasInstead",
-                    "partners_access": "partnersAccess",
-                }
-
-                if q_id in field_mapping:
-                    field_name = field_mapping[q_id]
-                    # Convert radio yes/no to boolean
-                    if q_id in ["ai_related", "gpu_needed", "maas_instead", "partners_access"]:
-                        final_fields[field_name] = (q_value.lower() == "yes")
-                    else:
-                        final_fields[field_name] = q_value
-
-            # Merge with any other fields from body.fields
-            final_fields = {**body.fields, **final_fields}
-            logger.info("jira: read ProForma form for epic %s", body.epic_key)
-        except Exception as e:
-            logger.warning("jira: ProForma read failed for epic %s, using workflow fields: %s", body.epic_key, e)
-            final_fields = body.fields
-    else:
-        final_fields = body.fields
+    # Use workflow fields (ProForma removed - fields stored in description only)
+    final_fields = body.fields
 
     # Rebuild epic description with final values
     if body.epic_type in ("rhdp_published", "onboarded"):
@@ -1467,56 +1396,69 @@ async def get_preintake_data(
     settings: Settings = Depends(get_settings),
     auth: tuple[str, int] = Depends(_require_auth),
 ):
-    """Fetch pre-intake data from Jira ProForma form.
-    Returns structured onboarding fields for intake skill."""
+    """Fetch pre-intake data from workflow.
+    Returns structured onboarding fields for intake skill.
+    Fields are stored in workflow data and synced to Jira epic description."""
     owner, groups = auth
     _require_group(groups, GROUP_BITS["rhdp-developers"], "rhdp-developers")
 
+    # Get project_id from epic via Jira
     if not settings.jira_url or not settings.jira_email or not settings.jira_api_token:
         raise HTTPException(status_code=503, detail="Jira not configured")
 
+    # Fetch epic to get project ID from labels or summary
     auth_str = base64.b64encode(f"{settings.jira_email}:{settings.jira_api_token}".encode()).decode()
     headers = {
         "Authorization": f"Basic {auth_str}",
         "Content-Type": "application/json",
     }
 
-    # Fetch ProForma form data
     try:
         req = urllib.request.Request(
-            f"{settings.jira_url.rstrip('/')}/rest/api/1/form/{epic_key}",
+            f"{settings.jira_url.rstrip('/')}/rest/api/3/issue/{epic_key}",
             headers=headers,
         )
-        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=15) as r:
-            form_data = json.loads(r.read().decode())
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
+            epic_data = json.loads(r.read().decode())
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch ProForma form for epic {epic_key}: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch epic {epic_key}: {e}")
 
-    # Parse form questions to extract field values
-    questions = form_data.get("questions", [])
-    field_map = {}
-    for q in questions:
-        q_id = q.get("id", "")
-        q_value = q.get("value", "")
-        field_map[q_id] = q_value
+    # Convert ADF description to plain text for skill to parse
+    description_adf = epic_data.get("fields", {}).get("description", {})
 
-    # Map ProForma fields to response
-    def bool_from_radio(value: str) -> bool:
-        return value.lower() == "yes"
+    def adf_to_text(adf: dict) -> str:
+        """Convert ADF to plain text."""
+        if not isinstance(adf, dict):
+            return ""
 
-    return PreIntakeDataResponse(
-        epic_key=epic_key,
-        assetTitle=field_map.get("asset_title", ""),
-        projectDescription=field_map.get("project_description", ""),
-        contentOutline=field_map.get("content_outline", ""),
-        learningObjectives=field_map.get("learning_objectives", ""),
-        contentType=field_map.get("content_type", "lab"),
-        automationType=field_map.get("automation_type", "ansible"),
-        associatedOpportunities=field_map.get("associated_opportunities", ""),
-        salesPlayTdp=field_map.get("sales_play_tdp", ""),
-        aiRelated=bool_from_radio(field_map.get("ai_related", "no")),
-        gpuNeeded=bool_from_radio(field_map.get("gpu_needed", "no")),
-        maasInstead=bool_from_radio(field_map.get("maas_instead", "no")),
-        partnersAccess=bool_from_radio(field_map.get("partners_access", "no")),
-    )
+        lines = []
+        for node in adf.get("content", []):
+            node_type = node.get("type", "")
+
+            if node_type == "heading":
+                level = node.get("attrs", {}).get("level", 1)
+                text = "".join([c.get("text", "") for c in node.get("content", [])])
+                lines.append(f"{'#' * level} {text}")
+            elif node_type == "paragraph":
+                text = ""
+                for c in node.get("content", []):
+                    if c.get("type") == "text":
+                        text += c.get("text", "")
+                    elif c.get("type") == "hardBreak":
+                        text += "\n"
+                if text.strip():
+                    lines.append(text)
+            elif node_type == "bulletList":
+                for item in node.get("content", []):
+                    if item.get("type") == "listItem":
+                        for para in item.get("content", []):
+                            item_text = "".join([c.get("text", "") for c in para.get("content", [])])
+                            lines.append(f"- {item_text}")
+
+        return "\n".join(lines)
+
+    description_text = adf_to_text(description_adf)
+
+    # Return just the description text - skill will parse it
+    return {"epic_key": epic_key, "description": description_text}
 

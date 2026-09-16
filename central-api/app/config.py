@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # GitHub integration
     github_token: str = ""
     github_template_repo: str = "https://github.com/rhpds/rhdp-publishing-house-template"
+    ph_git_ref: str = "main"  # Publishing House skills repo branch
 
     # OIDC/Keycloak authentication (for portal endpoints)
     oidc_issuer_url: str = ""

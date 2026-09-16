@@ -305,6 +305,7 @@ spec:
           teamMembers: ${{ parameters.github_users }}
           tags: ${{ parameters.tags }}
           intakeType: new
+          phGitRef: ${{ environment.parameters.phGitRef }}
 
   output:
     links:

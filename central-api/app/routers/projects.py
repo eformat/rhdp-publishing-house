@@ -115,6 +115,7 @@ class StartWorkflowRequest(BaseModel):
     teamMembers: list[dict] = []
     tags: list[str] = []
     intakeType: str = "new"
+    phGitRef: str = "main"  # Publishing House skills repo branch
 
 
 class StartWorkflowResponse(BaseModel):
@@ -500,10 +501,11 @@ def _check_github_write_access(repo_url: str, github_user: str | None) -> None:
 async def start_workflow(
     project_name: str,
     body: StartWorkflowRequest,
-    _caller: str = Depends(_require_auth),
+    auth: tuple[str, int] = Depends(_require_auth),
 ):
     """Start a new Publishing House workflow from template submission.
     Creates SonataFlow workflow instance with all onboarding fields."""
+    owner, groups = auth
     settings = get_settings()
 
     # Generate workflow ID
@@ -535,6 +537,7 @@ async def start_workflow(
         "teamMembers": body.teamMembers,
         "tags": body.tags,
         "intakeType": body.intakeType,
+        "phGitRef": body.phGitRef,
         "workflow_id": workflow_id,
     }
 
@@ -1122,87 +1125,216 @@ async def submit_preintake_update(
 
 # ── Repository Creation ─────────────────────────────────────────────────────
 
-@router.post("/{project_id}/create-catalog", response_model=CreateCatalogResponse)
+@router.post("/{project_id}/create-catalog", status_code=202)
 async def create_catalog(
     project_id: str,
     body: CreateCatalogRequest = CreateCatalogRequest(),
-    _caller: str = Depends(_require_auth),
+    auth: tuple[str, int] = Depends(_require_auth),
 ):
     """Create GitHub repo from template, sync workflow metadata, and register Backstage catalog.
-    Called by SonataFlow CreateCatalog state after pre-intake approval."""
+    Called by SonataFlow CreateCatalog state after pre-intake approval.
+
+    Returns 202 Accepted immediately and runs repo creation in background.
+    Sends ph.catalog.created CloudEvent when complete."""
+    owner, groups = auth
     settings = get_settings()
 
-    if not settings.github_token:
-        raise HTTPException(status_code=503, detail="GitHub token not configured")
+    # Start background task and return immediately
+    asyncio.create_task(_create_catalog_background(project_id, body, settings))
+    return {"status": "accepted", "project_id": project_id}
 
-    # Parse template repo URL from config
-    template_url = settings.github_template_repo.replace("https://github.com/", "").replace(".git", "")
-    template_parts = template_url.split("/")
-    if len(template_parts) != 2:
-        raise HTTPException(status_code=500, detail=f"Invalid template_repo config: {settings.github_template_repo}")
 
-    template_owner, template_name = template_parts
-
-    # Get workflow data for syncing
-    wd_result = _get_workflow_data(project_id)
-    workflow_id = wd_result.get("workflow_id", "")
-    epic_key = wd_result.get("epic_key", "")
-    jira_url = f"https://redhat.atlassian.net/browse/{epic_key}" if epic_key else ""
-
-    # Create repo from template using GitHub API
-    headers = {
-        "Authorization": f"Bearer {settings.github_token}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
-    create_payload = {
-        "owner": body.repo_owner,
-        "name": project_id,
-        "description": f"https://rhpds.github.io/{project_id}",
-        "include_all_branches": False,
-        "private": False,
-    }
-
-    req = urllib.request.Request(
-        f"https://api.github.com/repos/{template_owner}/{template_name}/generate",
-        data=json.dumps(create_payload).encode(),
-        headers=headers,
-        method="POST",
-    )
-
+async def _create_catalog_background(project_id: str, body: CreateCatalogRequest, settings):
+    """Background task for creating GitHub repo and registering catalog.
+    Sends ph.catalog.created CloudEvent when complete."""
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            repo_data = json.loads(r.read().decode())
-            repo_full_name = repo_data["full_name"]
-            repo_url = repo_data["html_url"]
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"GitHub repo creation failed: {e}")
+        if not settings.github_token:
+            logger.error("github: token not configured for %s", project_id)
+            return
 
-    # Add collaborators
-    for collab in body.collaborators:
-        username = collab.get("user", "")
-        permission = collab.get("access", "push")
+        # Parse template repo URL from config
+        template_url = settings.github_template_repo.replace("https://github.com/", "").replace(".git", "")
+        template_parts = template_url.split("/")
+        if len(template_parts) != 2:
+            logger.error("github: invalid template_repo config: %s", settings.github_template_repo)
+            return
 
-        collab_req = urllib.request.Request(
-            f"https://api.github.com/repos/{repo_full_name}/collaborators/{username}",
-            data=json.dumps({"permission": permission}).encode(),
+        template_owner, template_name = template_parts
+
+        # Get workflow data for syncing
+        wd_result = _get_workflow_data(project_id)
+        workflow_id = wd_result.get("workflow_id", "")
+        epic_key = wd_result.get("epic_key", "")
+        jira_url = f"https://redhat.atlassian.net/browse/{epic_key}" if epic_key else ""
+
+        # Create repo from template using GitHub API
+        headers = {
+            "Authorization": f"Bearer {settings.github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+        create_payload = {
+            "owner": body.repo_owner,
+            "name": project_id,
+            "description": f"https://rhpds.github.io/{project_id}",
+            "include_all_branches": False,
+            "private": False,
+        }
+
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{template_owner}/{template_name}/generate",
+            data=json.dumps(create_payload).encode(),
             headers=headers,
-            method="PUT",
+            method="POST",
         )
 
         try:
-            with urllib.request.urlopen(collab_req, timeout=15):
-                logger.info("github: added collaborator %s to %s", username, repo_full_name)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                repo_data = json.loads(r.read().decode())
+                repo_full_name = repo_data["full_name"]
+                repo_url = repo_data["html_url"]
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode() if e.fp else ""
+            logger.error("github: repo creation failed for %s: %s %s - %s", project_id, e.code, e.reason, error_body)
+            return
         except Exception as e:
-            logger.warning("github: failed to add collaborator %s to %s: %s", username, repo_full_name, e)
+            logger.error("github: repo creation failed for %s: %s", project_id, e)
+            return
 
-    # Wait for repo initialization
-    default_branch = "main"
-    max_retries = 15
-    commit_hash = "unknown"
-    for i in range(max_retries):
+        # Add collaborators
+        for collab in body.collaborators:
+            username = collab.get("user", "")
+            permission = collab.get("access", "push")
+
+            collab_req = urllib.request.Request(
+                f"https://api.github.com/repos/{repo_full_name}/collaborators/{username}",
+                data=json.dumps({"permission": permission}).encode(),
+                headers=headers,
+                method="PUT",
+            )
+
+            try:
+                with urllib.request.urlopen(collab_req, timeout=15):
+                    logger.info("github: added collaborator %s to %s", username, repo_full_name)
+            except Exception as e:
+                logger.warning("github: failed to add collaborator %s to %s: %s", username, repo_full_name, e)
+
+        # Wait for repo initialization
+        default_branch = "main"
+        max_retries = 15
+        commit_hash = "unknown"
+        for i in range(max_retries):
+            try:
+                branch_req = urllib.request.Request(
+                    f"https://api.github.com/repos/{repo_full_name}/git/ref/heads/{default_branch}",
+                    headers=headers,
+                )
+                with urllib.request.urlopen(branch_req, timeout=10) as r:
+                    ref_data = json.loads(r.read().decode())
+                    commit_hash = ref_data["object"]["sha"]
+                    break
+            except:
+                if i < max_retries - 1:
+                    await asyncio.sleep(2)
+
+        logger.info("github: created repo %s from template %s", repo_full_name, settings.github_template_repo)
+
+        # Render Jinja templates and sync workflow metadata
+        tmpdir = None
         try:
+            from jinja2 import Template
+
+            tmpdir = tempfile.mkdtemp()
+            clone_url = f"https://x-access-token:{settings.github_token}@github.com/{repo_full_name}.git"
+
+            # Clone repo
+            subprocess.run(["git", "clone", clone_url, tmpdir], check=True, capture_output=True, timeout=60)
+
+            # Get full workflow data for template rendering
+            wf_data = _get_graphql_workflow(workflow_id, settings)
+
+            # Build template context from workflow data
+            template_values = {
+                "project_name": project_id,
+                "user_email": wf_data.get("ssoEmail", ""),
+                "github_user": wf_data.get("ssoUser", ""),
+                "project_description": wf_data.get("projectDescription", ""),
+                "content_type": wf_data.get("contentType", "lab"),
+                "deployment_mode": "rhdp_published",
+                "initiative_key": wf_data.get("initiativeKey", "rh1_2027"),
+                "showroom_type": wf_data.get("showroomType", "classic"),
+                "intake_type": wf_data.get("intakeType", "new"),
+                "automation_type": wf_data.get("automationType", "ansible"),
+                "repo_url": f"https://github.com/{repo_full_name}",
+                "devspaces_url": settings.devspaces_url,
+                "central_api_url": settings.central_api_url,
+                "ph_git_ref": wf_data.get("phGitRef", "main"),
+            }
+
+            # Render Jinja templates in place (catalog-info.yaml, spec.yaml, README.md, .devfile.yaml)
+            template_files = [
+                os.path.join(tmpdir, "catalog-info.yaml"),
+                os.path.join(tmpdir, "publishing-house", "spec.yaml"),
+                os.path.join(tmpdir, "README.md"),
+                os.path.join(tmpdir, ".devfile.yaml"),
+            ]
+
+            for template_file in template_files:
+                if os.path.exists(template_file):
+                    with open(template_file, 'r') as f:
+                        content = f.read()
+
+                    # Render Jinja template
+                    template = Template(content)
+                    rendered = template.render(values=template_values)
+
+                    with open(template_file, 'w') as f:
+                        f.write(rendered)
+
+            # Update spec.yaml with workflow metadata
+            spec_path = os.path.join(tmpdir, "publishing-house", "spec.yaml")
+            if os.path.exists(spec_path):
+                with open(spec_path, "r") as f:
+                    spec_data = yaml.safe_load(f)
+
+                if "project" not in spec_data:
+                    spec_data["project"] = {}
+                spec_data["project"]["jira_ticket"] = epic_key
+                spec_data["project"]["workflow_id"] = workflow_id
+
+                with open(spec_path, "w") as f:
+                    yaml.dump(spec_data, f, default_flow_style=False, sort_keys=False)
+
+            # Update catalog-info.yaml with Jira link
+            catalog_path = os.path.join(tmpdir, "catalog-info.yaml")
+            if os.path.exists(catalog_path) and jira_url:
+                with open(catalog_path, "r") as f:
+                    catalog_data = yaml.safe_load(f)
+
+                if "metadata" not in catalog_data:
+                    catalog_data["metadata"] = {}
+                if "links" not in catalog_data["metadata"]:
+                    catalog_data["metadata"]["links"] = []
+
+                # Add Jira link if not already present
+                jira_link = {"url": jira_url, "title": "Jira Epic", "icon": "bugs"}
+                if not any(link.get("url") == jira_url for link in catalog_data["metadata"]["links"]):
+                    catalog_data["metadata"]["links"].append(jira_link)
+
+                with open(catalog_path, "w") as f:
+                    yaml.dump(catalog_data, f, default_flow_style=False, sort_keys=False)
+
+            # Commit and push
+            subprocess.run(["git", "config", "user.email", "central-api@rhdp.io"], cwd=tmpdir, check=True, timeout=10)
+            subprocess.run(["git", "config", "user.name", "Central API"], cwd=tmpdir, check=True, timeout=10)
+            subprocess.run(["git", "add", "catalog-info.yaml", "publishing-house/spec.yaml", "README.md", ".devfile.yaml"], cwd=tmpdir, check=True, timeout=10)
+            subprocess.run(["git", "commit", "-m", "feat: render templates and sync workflow metadata"], cwd=tmpdir, check=True, timeout=10)
+            subprocess.run(["git", "push"], cwd=tmpdir, check=True, timeout=60)
+
+            logger.info("github: synced workflow metadata to %s", repo_full_name)
+
+            # Get new commit hash after sync
             branch_req = urllib.request.Request(
                 f"https://api.github.com/repos/{repo_full_name}/git/ref/heads/{default_branch}",
                 headers=headers,
@@ -1210,160 +1342,51 @@ async def create_catalog(
             with urllib.request.urlopen(branch_req, timeout=10) as r:
                 ref_data = json.loads(r.read().decode())
                 commit_hash = ref_data["object"]["sha"]
-                break
-        except:
-            if i < max_retries - 1:
-                await asyncio.sleep(2)
 
-    logger.info("github: created repo %s from template %s", repo_full_name, settings.github_template_repo)
+        except Exception as e:
+            logger.error("github: failed to sync metadata to %s: %s", repo_full_name, e)
+            # Continue - repo is created even if sync fails
+        finally:
+            if tmpdir and os.path.exists(tmpdir):
+                shutil.rmtree(tmpdir, ignore_errors=True)
 
-    # Render Jinja templates and sync workflow metadata
-    tmpdir = None
-    try:
-        from jinja2 import Template
+        # Register with Backstage catalog
+        catalog_registered = False
+        try:
+            if settings.rhdh_service_token and settings.rhdh_internal_url:
+                catalog_entity_url = f"https://github.com/{repo_full_name}/blob/{default_branch}/catalog-info.yaml"
+                catalog_req = urllib.request.Request(
+                    f"{settings.rhdh_internal_url.rstrip('/')}/api/catalog/locations",
+                    data=json.dumps({
+                        "type": "url",
+                        "target": catalog_entity_url
+                    }).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {settings.rhdh_service_token}",
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(catalog_req, timeout=15) as r:
+                    catalog_registered = True
+                    logger.info("backstage: registered catalog entity for %s", project_id)
+        except Exception as e:
+            logger.warning("backstage: failed to register catalog entity for %s: %s", project_id, e)
 
-        tmpdir = tempfile.mkdtemp()
-        clone_url = f"https://x-access-token:{settings.github_token}@github.com/{repo_full_name}.git"
-
-        # Clone repo
-        subprocess.run(["git", "clone", clone_url, tmpdir], check=True, capture_output=True, timeout=60)
-
-        # Get full workflow data for template rendering
-        wf_data = _get_graphql_workflow(workflow_id, settings)
-
-        # Build template context from workflow data
-        template_values = {
-            "project_name": project_id,
-            "user_email": wf_data.get("ssoEmail", ""),
-            "github_user": wf_data.get("ssoUser", ""),
-            "project_description": wf_data.get("projectDescription", ""),
-            "content_type": wf_data.get("contentType", "lab"),
-            "deployment_mode": "rhdp_published",
-            "initiative_key": wf_data.get("initiativeKey", "rh1_2027"),
-            "showroom_type": wf_data.get("showroomType", "classic"),
-            "intake_type": wf_data.get("intakeType", "new"),
-            "automation_type": wf_data.get("automationType", "ansible"),
-            "repo_url": f"https://github.com/{repo_full_name}",
-            "devspaces_url": settings.devspaces_url,
-            "central_api_url": settings.central_api_url,
-        }
-
-        # Render Jinja templates in place (catalog-info.yaml, spec.yaml, README.md)
-        template_files = [
-            os.path.join(tmpdir, "catalog-info.yaml"),
-            os.path.join(tmpdir, "publishing-house", "spec.yaml"),
-            os.path.join(tmpdir, "README.md"),
-        ]
-
-        for template_file in template_files:
-            if os.path.exists(template_file):
-                with open(template_file, 'r') as f:
-                    content = f.read()
-
-                # Render Jinja template
-                template = Template(content)
-                rendered = template.render(values=template_values)
-
-                with open(template_file, 'w') as f:
-                    f.write(rendered)
-
-        # Update spec.yaml with workflow metadata
-        spec_path = os.path.join(tmpdir, "publishing-house", "spec.yaml")
-        if os.path.exists(spec_path):
-            with open(spec_path, "r") as f:
-                spec_data = yaml.safe_load(f)
-
-            if "project" not in spec_data:
-                spec_data["project"] = {}
-            spec_data["project"]["jira_ticket"] = epic_key
-            spec_data["project"]["workflow_id"] = workflow_id
-
-            with open(spec_path, "w") as f:
-                yaml.dump(spec_data, f, default_flow_style=False, sort_keys=False)
-
-        # Update catalog-info.yaml with Jira link
-        catalog_path = os.path.join(tmpdir, "catalog-info.yaml")
-        if os.path.exists(catalog_path) and jira_url:
-            with open(catalog_path, "r") as f:
-                catalog_data = yaml.safe_load(f)
-
-            if "metadata" not in catalog_data:
-                catalog_data["metadata"] = {}
-            if "links" not in catalog_data["metadata"]:
-                catalog_data["metadata"]["links"] = []
-
-            # Add Jira link if not already present
-            jira_link = {"url": jira_url, "title": "Jira Epic", "icon": "bugs"}
-            if not any(link.get("url") == jira_url for link in catalog_data["metadata"]["links"]):
-                catalog_data["metadata"]["links"].append(jira_link)
-
-            with open(catalog_path, "w") as f:
-                yaml.dump(catalog_data, f, default_flow_style=False, sort_keys=False)
-
-        # Commit and push
-        subprocess.run(["git", "config", "user.email", "central-api@rhdp.io"], cwd=tmpdir, check=True, timeout=10)
-        subprocess.run(["git", "config", "user.name", "Central API"], cwd=tmpdir, check=True, timeout=10)
-        subprocess.run(["git", "add", "catalog-info.yaml", "publishing-house/spec.yaml"], cwd=tmpdir, check=True, timeout=10)
-        subprocess.run(["git", "commit", "-m", "feat: render templates and sync workflow metadata"], cwd=tmpdir, check=True, timeout=10)
-        subprocess.run(["git", "push"], cwd=tmpdir, check=True, timeout=60)
-
-        logger.info("github: synced workflow metadata to %s", repo_full_name)
-
-        # Get new commit hash after sync
-        branch_req = urllib.request.Request(
-            f"https://api.github.com/repos/{repo_full_name}/git/ref/heads/{default_branch}",
-            headers=headers,
+        # Send ph.catalog.created CloudEvent to SonataFlow
+        _send_cloud_event(
+            "ph.catalog.created",
+            project_id,
+            {
+                "repo_url": repo_url,
+                "commit_hash": commit_hash,
+                "catalog_registered": catalog_registered,
+            }
         )
-        with urllib.request.urlopen(branch_req, timeout=10) as r:
-            ref_data = json.loads(r.read().decode())
-            commit_hash = ref_data["object"]["sha"]
+        logger.info("catalog: created catalog for %s - repo=%s", project_id, repo_url)
 
     except Exception as e:
-        logger.error("github: failed to sync metadata to %s: %s", repo_full_name, e)
-        # Continue - repo is created even if sync fails
-    finally:
-        if tmpdir and os.path.exists(tmpdir):
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
-    # Register with Backstage catalog
-    catalog_registered = False
-    try:
-        if settings.rhdh_service_token and settings.rhdh_internal_url:
-            catalog_entity_url = f"{repo_url}/blob/{default_branch}/catalog-info.yaml"
-            catalog_req = urllib.request.Request(
-                f"{settings.rhdh_internal_url.rstrip('/')}/api/catalog/locations",
-                data=json.dumps({
-                    "type": "url",
-                    "target": catalog_entity_url
-                }).encode(),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {settings.rhdh_service_token}",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(catalog_req, timeout=15) as r:
-                catalog_registered = True
-                logger.info("backstage: registered catalog entity for %s", project_id)
-    except Exception as e:
-        logger.warning("backstage: failed to register catalog entity for %s: %s", project_id, e)
-
-    # Send ph.catalog.created CloudEvent to SonataFlow
-    _send_cloud_event(
-        "ph.catalog.created",
-        project_id,
-        {
-            "repo_url": repo_url,
-            "commit_hash": commit_hash,
-            "catalog_registered": catalog_registered,
-        }
-    )
-
-    return CreateCatalogResponse(
-        repo_url=repo_url,
-        commit_hash=commit_hash,
-        catalog_registered=catalog_registered,
-    )
+        logger.error("catalog: background task failed for %s: %s", project_id, e, exc_info=True)
 
 
 # ── Content Review ──────────────────────────────────────────────────────────
@@ -2012,6 +2035,9 @@ async def delete_project(
 
     Requires rhdp-administrators group. Best-effort: each step
     runs independently. Failures are reported but don't block subsequent steps.
+
+    Args:
+        delete_repo: If True, deletes the GitHub repository. Default False.
     """
     owner, groups = auth
     _require_group(groups, GROUP_BITS["rhdp-administrators"], "rhdp-administrators")
@@ -2135,42 +2161,52 @@ async def delete_project(
                 "Authorization": f"Bearer {settings.rhdh_service_token}",
                 "Accept": "application/json",
             }
-            entity_url = f"{catalog_base}/entities/by-name/component/default/{project_slug}"
-            req = urllib.request.Request(entity_url, headers=catalog_headers)
-            with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
-                entity = json.loads(r.read().decode())
 
-            location_ref = entity.get("metadata", {}).get("annotations", {}).get(
-                "backstage.io/managed-by-location", ""
-            )
-            match = re.match(r"url:(.+)", location_ref)
-            if match:
-                target_url = match.group(1)
-                req = urllib.request.Request(f"{catalog_base}/locations", headers=catalog_headers)
+            # Try to get entity (may not exist if already deleted)
+            entity = None
+            try:
+                entity_url = f"{catalog_base}/entities/by-name/component/default/{project_slug}"
+                req = urllib.request.Request(entity_url, headers=catalog_headers)
                 with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
-                    locations = json.loads(r.read().decode())
-                for loc in locations:
-                    loc_target = (loc.get("data") or {}).get("target", "") or loc.get("target", "")
-                    if loc_target == target_url:
-                        loc_id = loc.get("data", {}).get("id") or loc.get("id")
+                    entity = json.loads(r.read().decode())
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    logger.info("delete: entity not found for %s (already deleted)", project_slug)
+                else:
+                    raise
+
+            # Delete entity if it exists
+            if entity:
+                entity_uid = entity.get("metadata", {}).get("uid", "")
+                if entity_uid:
+                    req = urllib.request.Request(
+                        f"{catalog_base}/entities/by-uid/{entity_uid}",
+                        method="DELETE",
+                        headers=catalog_headers,
+                    )
+                    urllib.request.urlopen(req, context=_SSL_CTX, timeout=10)
+                    logger.info("delete: removed catalog entity %s", project_slug)
+
+            # Delete location(s) - check all locations for orphaned entries
+            req = urllib.request.Request(f"{catalog_base}/locations", headers=catalog_headers)
+            with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
+                locations = json.loads(r.read().decode())
+
+            for loc in locations:
+                loc_target = (loc.get("data") or {}).get("target", "") or loc.get("target", "")
+                # Match locations that reference this project
+                if project_slug in loc_target:
+                    loc_id = loc.get("data", {}).get("id") or loc.get("id")
+                    try:
                         req = urllib.request.Request(
                             f"{catalog_base}/locations/{loc_id}",
                             method="DELETE",
                             headers=catalog_headers,
                         )
                         urllib.request.urlopen(req, context=_SSL_CTX, timeout=10)
-                        logger.info("delete: removed catalog location for %s", project_slug)
-                        break
-
-            entity_uid = entity.get("metadata", {}).get("uid", "")
-            if entity_uid:
-                req = urllib.request.Request(
-                    f"{catalog_base}/entities/by-uid/{entity_uid}",
-                    method="DELETE",
-                    headers=catalog_headers,
-                )
-                urllib.request.urlopen(req, context=_SSL_CTX, timeout=10)
-                logger.info("delete: removed catalog entity %s", project_slug)
+                        logger.info("delete: removed catalog location %s for %s", loc_id, project_slug)
+                    except Exception as e:
+                        logger.warning("delete: failed to remove location %s: %s", loc_id, e)
 
             result.catalog_cleaned = True
         except Exception as e:

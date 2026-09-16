@@ -83,6 +83,22 @@ spec:
                 secretKeyRef:
                   name: ph-developer-hub-env
                   key: RHDH_SERVICE_TOKEN
+            - name: SONATAFLOW_DB_HOST
+              value: "sonataflow-postgresql.publishing-house.svc.cluster.local"
+            - name: SONATAFLOW_DB_PORT
+              value: "5432"
+            - name: SONATAFLOW_DB_NAME
+              value: "sonataflow"
+            - name: SONATAFLOW_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: sonataflow-postgresql-svcbind
+                  key: username
+            - name: SONATAFLOW_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: sonataflow-postgresql-svcbind
+                  key: password
           volumeMounts:
             - name: validation-policy
               mountPath: /etc/ph-policy
