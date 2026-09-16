@@ -340,6 +340,37 @@ _STATE_MAP = {
 }
 
 
+def _get_graphql_workflow(workflow_id: str, settings):
+    """Query full workflow data by workflow ID for template rendering."""
+    try:
+        graphql_query = {
+            "query": """
+                query GetWorkflowById($id: String!) {
+                    ProcessInstances(where: { id: { equal: $id } }) {
+                        id
+                        variables
+                    }
+                }
+            """,
+            "variables": {"id": workflow_id}
+        }
+        req = urllib.request.Request(
+            f"{settings.sonataflow_graphql_url.rstrip('/')}/graphql",
+            data=json.dumps(graphql_query).encode(),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
+            result = json.loads(r.read().decode())
+        instances = result.get("data", {}).get("ProcessInstances", [])
+        if not instances:
+            return {}
+        variables = instances[0].get("variables", {})
+        return variables.get("workflowdata", {}) if isinstance(variables, dict) else {}
+    except Exception as e:
+        logger.warning("_get_graphql_workflow failed for %s: %s", workflow_id, e)
+        return {}
+
+
 def _get_workflow_state(workflow_id: str):
     """Internal: query workflow state — no auth check."""
     settings = get_settings()
