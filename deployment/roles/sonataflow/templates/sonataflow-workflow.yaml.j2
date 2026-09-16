@@ -353,7 +353,8 @@ spec:
             . + {
               repoUrl: (.catalogData.repoUrl // ""),
               commitHash: (.catalogData.commitHash // ""),
-              catalogRegistered: (.catalogData.catalogRegistered // false)
+              catalogRegistered: (.catalogData.catalogRegistered // false),
+              auditTrailSha: (.catalogData.commitSha // "")
             } | del(.catalogData)
         transition:
           nextState: Intake
