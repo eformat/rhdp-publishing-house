@@ -59,42 +59,31 @@ class Settings(BaseSettings):
     rcars_url: str = "https://rcars-api.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
     rcars_api_key: str = ""
 
-    def _get_route_url(self, route_name: str, namespace: str = "publishing-house", fallback: str = "") -> str:
+    def _get_route_url(self, route_name: str, namespace: str = "publishing-house") -> str:
         """Query OpenShift Route to get external URL."""
-        try:
-            k8s_config.load_incluster_config()
-            custom_api = client.CustomObjectsApi()
-            route = custom_api.get_namespaced_custom_object(
-                group="route.openshift.io",
-                version="v1",
-                namespace=namespace,
-                plural="routes",
-                name=route_name
-            )
-            host = route.get("spec", {}).get("host", "")
-            if host:
-                return f"https://{host}"
-        except Exception as e:
-            logger.warning(f"Failed to query route {route_name}: {e}")
-        return fallback
+        k8s_config.load_incluster_config()
+        custom_api = client.CustomObjectsApi()
+        route = custom_api.get_namespaced_custom_object(
+            group="route.openshift.io",
+            version="v1",
+            namespace=namespace,
+            plural="routes",
+            name=route_name
+        )
+        host = route.get("spec", {}).get("host", "")
+        if not host:
+            raise ValueError(f"Route {route_name} in namespace {namespace} has no host")
+        return f"https://{host}"
 
     @property
     def devspaces_url(self) -> str:
         """Query DevSpaces route URL from cluster."""
-        return self._get_route_url(
-            "devspaces",
-            namespace="devspaces",
-            fallback="https://devspaces.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
-        )
+        return self._get_route_url("devspaces", namespace="devspaces")
 
     @property
     def central_api_url(self) -> str:
         """Query Central API route URL from cluster."""
-        return self._get_route_url(
-            "central-api",
-            namespace="publishing-house",
-            fallback="https://central-api-publishing-house.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
-        )
+        return self._get_route_url("central-api", namespace="publishing-house")
 
     # Drift semantic cache TTL (seconds, default 3 days)
     drift_cache_ttl_seconds: int = 259200
