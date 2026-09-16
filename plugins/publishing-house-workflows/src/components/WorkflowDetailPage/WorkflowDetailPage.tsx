@@ -348,9 +348,15 @@ export function WorkflowDetailPage() {
       setSnackbar({
         open: true,
         severity: 'success',
-        message: `${STAGE_LABELS[rejectingStage]} rejected — returning to ${rejectingStage === 'pre_intake_review' ? 'Pre-Intake' : 'Intake'}...`,
+        message: `${STAGE_LABELS[rejectingStage]} rejected — waiting for workflow to transition...`,
       });
-      setTimeout(() => navigate('/publishing-house-workflows'), 2000);
+      const prevStage = result.summary.stage;
+      for (let i = 0; i < 6; i++) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        const updated = await client.getWorkflow(result.summary.projectId);
+        if (updated && updated.summary.stage !== prevStage) break;
+      }
+      setRefreshKey(k => k + 1);
     } catch (err: any) {
       setSnackbar({
         open: true,
