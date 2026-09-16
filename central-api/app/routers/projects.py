@@ -1943,8 +1943,6 @@ async def start_workflow(
         wd["tags"] = body.tags
     if body.project_description:
         wd["projectDescription"] = body.project_description
-    if body.audit_trail_sha:
-        wd["auditTrailSha"] = body.audit_trail_sha
     if body.showroom_type:
         wd["showroomType"] = body.showroom_type
     wd["intakeType"] = body.intake_type
