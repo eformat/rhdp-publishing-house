@@ -129,10 +129,10 @@ spec:
         project_name:
           title: Project Name (slug)
           type: string
-          description: Repository name (letters, numbers, hyphens only)
+          description: "Repository name will be: ph-{your-input}"
           ui:placeholder: "openshift-ai-workshop"
           pattern: '^[a-z0-9-]+$'
-          ui:help: Use lowercase letters, numbers, and hyphens only
+          ui:help: "Project will be created as: ph-{your-input}. Use lowercase letters, numbers, and hyphens only"
 
         github_users:
           title: GitHub Collaborators
@@ -267,7 +267,7 @@ spec:
       name: Check Project Name Availability
       action: catalog:fetch
       input:
-        entityRef: component:default/${{ parameters.project_name }}
+        entityRef: component:default/ph-${{ parameters.project_name }}
         optional: true
 
     # Step 2: Start workflow via central API (NO repo creation - happens after pre-intake approval)
@@ -277,11 +277,11 @@ spec:
       action: http:backstage:request
       input:
         method: POST
-        path: '/proxy/central-api/projects/${{ parameters.project_name }}/start'
+        path: '/proxy/central-api/projects/ph-${{ parameters.project_name }}/start'
         headers:
           content-type: 'application/json'
         body:
-          projectId: ${{ parameters.project_name }}
+          projectId: ph-${{ parameters.project_name }}
           deploymentMode: rhdp_published
           ssoUser: ${{ user.entity.metadata.name }}
           ssoEmail: ${{ user.entity.spec.profile.email }}
@@ -311,7 +311,7 @@ spec:
     links:
       - title: View Workflow Status
         icon: dashboard
-        url: /publishing-house/projects/${{ parameters.project_name }}
+        url: /publishing-house/projects/ph-${{ parameters.project_name }}
         if: ${{ steps['check-catalog'].output.entity == null }}
 
       - title: View Jira Epic
@@ -321,7 +321,7 @@ spec:
 
       - title: View Existing Entity in Catalog
         icon: catalog
-        url: /catalog/default/component/${{ parameters.project_name }}
+        url: /catalog/default/component/ph-${{ parameters.project_name }}
         if: ${{ steps['check-catalog'].output.entity != null }}
 
     text:
@@ -330,7 +330,7 @@ spec:
           {% if steps['check-catalog'].output.entity %}
           **Scaffolding Skipped**
 
-          A project named **"${{ parameters.project_name }}"** already exists in the catalog. All steps were skipped — no repository was created and no workflow was started. Re-run the template with a different project name.
+          A project named **"ph-${{ parameters.project_name }}"** already exists in the catalog. All steps were skipped — no repository was created and no workflow was started. Re-run the template with a different project name.
           {% else %}
           **Your Publishing House project is live!** You're ready to start building.
 
@@ -354,8 +354,8 @@ spec:
 
           **Local machine:**
           1. Install the skills: `git clone -b ${{ environment.parameters.phGitRef }} https://github.com/rhpds/rhdp-publishing-house-skills.git ~/.claude/skills/publishing-house`
-          2. Clone the repo: `git clone https://github.com/rhpds/${{ parameters.project_name }}`
-          3. `cd ${{ parameters.project_name }}`
+          2. Clone the repo: `git clone https://github.com/rhpds/ph-${{ parameters.project_name }}`
+          3. `cd ph-${{ parameters.project_name }}`
           4. Start Claude CLI: `claude`
           5. Run `/rhdp-publishing-house` — and you're off!
           {% endif %}
