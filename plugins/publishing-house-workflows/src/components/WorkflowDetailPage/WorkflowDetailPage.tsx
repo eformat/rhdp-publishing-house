@@ -107,7 +107,6 @@ const useStyles = makeStyles(theme => ({
   label: {
     color: theme.palette.text.secondary,
     fontSize: '0.75rem',
-    textTransform: 'uppercase' as const,
     fontWeight: 600,
     marginBottom: theme.spacing(0.5),
   },
@@ -351,13 +350,7 @@ export function WorkflowDetailPage() {
         severity: 'success',
         message: `${STAGE_LABELS[rejectingStage]} rejected — returning to ${rejectingStage === 'pre_intake_review' ? 'Pre-Intake' : 'Intake'}...`,
       });
-      const prevStage = result.summary.stage;
-      for (let i = 0; i < 6; i++) {
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        const updated = await client.getWorkflow(result.summary.projectId);
-        if (updated && updated.summary.stage !== prevStage) break;
-      }
-      setRefreshKey(k => k + 1);
+      setTimeout(() => navigate('/publishing-house-workflows'), 2000);
     } catch (err: any) {
       setSnackbar({
         open: true,

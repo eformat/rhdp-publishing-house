@@ -162,6 +162,50 @@ paths:
                     type: boolean
       security:
         - bearerAuth: []
+  /jira/epic/{epic_key}/preintake-data:
+    get:
+      operationId: getPreIntakeData
+      summary: Get pre-intake data from ProForma form
+      parameters:
+        - name: epic_key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Pre-intake data retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assetTitle:
+                    type: string
+                  projectDescription:
+                    type: string
+                  contentOutline:
+                    type: string
+                  learningObjectives:
+                    type: string
+                  contentType:
+                    type: string
+                  audience:
+                    type: string
+                  duration:
+                    type: string
+                  prerequisites:
+                    type: string
+                  author:
+                    type: string
+                  associatedOpportunities:
+                    type: string
+                  salesPlayTdp:
+                    type: string
+                  technicalNotes:
+                    type: string
+      security:
+        - bearerAuth: []
 components:
   securitySchemes:
     bearerAuth:
