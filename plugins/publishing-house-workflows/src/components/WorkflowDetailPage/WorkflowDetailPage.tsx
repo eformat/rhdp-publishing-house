@@ -54,7 +54,7 @@ import AddIcon from '@material-ui/icons/Add';
 import DeleteIcon from '@material-ui/icons/Delete';
 import { createPhWorkflowsClient } from '../../api/client';
 import { WorkflowStage, RejectionData, ValidationReport, CheckStatus, DriftReport, RcarsMatch } from '../../api/types';
-import { STAGE_LABELS, STAGE_DESCRIPTIONS } from '../../utils/stageMapping';
+import { STAGE_LABELS, STAGE_DESCRIPTIONS, stageIndex } from '../../utils/stageMapping';
 import { useUserGroups } from '../../hooks/useUserGroups';
 
 const REVIEW_STAGES: WorkflowStage[] = ['pre_intake_review', 'content_review', 'infra_review'];
@@ -62,6 +62,18 @@ const STAGES_WITH_REVIEW_TAB: WorkflowStage[] = [
   'content_review', 'infra_review', 'env_setup', 'development', 'testing', 'published',
 ];
 const PRE_INTAKE_STAGES: WorkflowStage[] = ['pre_intake', 'pre_intake_review'];
+
+// Expected next stages after approval/completion (matches workflow transitions)
+// Some stages can transition to multiple targets depending on decision
+const EXPECTED_NEXT_STAGES: Record<string, WorkflowStage[]> = {
+  pre_intake_review: ['pre_intake', 'intake'],  // Rejected → PreIntake, Approved → Intake
+  intake: ['content_review'],                   // Intake → ContentReview
+  content_review: ['intake', 'infra_review'],   // Rejected → Intake, Approved → InfraReview
+  infra_review: ['content_review', 'env_setup', 'development'], // Rejected → ContentReview, Approved → EnvSetup or Development
+  env_setup: ['development'],                   // EnvSetup → Development
+  development: ['testing'],                     // Development → Testing
+  testing: ['published'],                       // Testing → Published
+};
 
 const CHECK_GROUP_LABELS: Record<string, string> = {
   A: 'Spec Fields',
@@ -310,11 +322,13 @@ export function WorkflowDetailPage() {
         severity: 'success',
         message: `${STAGE_LABELS[stage]} approved — waiting for workflow to advance...`,
       });
-      const prevStage = result.summary.stage;
+      const currentStage = result.summary.stage;
+      const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         const updated = await client.getWorkflow(result.summary.projectId);
-        if (updated && updated.summary.stage !== prevStage) break;
+        if (updated && expectedStages.includes(updated.summary.stage)) break;
+        if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
       }
       setRefreshKey(k => k + 1);
     } catch (err: any) {
@@ -350,11 +364,13 @@ export function WorkflowDetailPage() {
         severity: 'success',
         message: `${STAGE_LABELS[rejectingStage]} rejected — waiting for workflow to transition...`,
       });
-      const prevStage = result.summary.stage;
+      const currentStage = result.summary.stage;
+      const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         const updated = await client.getWorkflow(result.summary.projectId);
-        if (updated && updated.summary.stage !== prevStage) break;
+        if (updated && expectedStages.includes(updated.summary.stage)) break;
+        if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
       }
       setRefreshKey(k => k + 1);
     } catch (err: any) {
@@ -398,11 +414,13 @@ export function WorkflowDetailPage() {
           severity: 'success',
           message: `Pre-intake ${action} — waiting for workflow to advance...`,
         });
-        const prevStage = result.summary.stage;
+        const currentStage = result.summary.stage;
+        const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
         for (let i = 0; i < 12; i++) {
           await new Promise(resolve => setTimeout(resolve, 5000));
           const updated = await client.getWorkflow(result.summary.projectId);
-          if (updated && updated.summary.stage !== prevStage) break;
+          if (updated && expectedStages.includes(updated.summary.stage)) break;
+          if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
         }
         setRefreshKey(k => k + 1);
       }
@@ -427,11 +445,13 @@ export function WorkflowDetailPage() {
         severity: 'success',
         message: 'Pre-intake update submitted — waiting for workflow to advance...',
       });
-      const prevStage = result.summary.stage;
+      const currentStage = result.summary.stage;
+      const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         const updated = await client.getWorkflow(result.summary.projectId);
-        if (updated && updated.summary.stage !== prevStage) break;
+        if (updated && expectedStages.includes(updated.summary.stage)) break;
+        if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
       }
       setRefreshKey(k => k + 1);
     } catch (err: any) {
@@ -467,11 +487,13 @@ export function WorkflowDetailPage() {
     try {
       await client.submitEnvSetup(result.summary.projectId, filteredAgv, filteredCi);
       setSnackbar({ open: true, severity: 'success', message: 'Env setup info submitted — waiting for workflow to advance...' });
-      const prevStage = result.summary.stage;
+      const currentStage = result.summary.stage;
+      const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
         const updated = await client.getWorkflow(result.summary.projectId);
-        if (updated && updated.summary.stage !== prevStage) break;
+        if (updated && expectedStages.includes(updated.summary.stage)) break;
+        if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
       }
       setRefreshKey(k => k + 1);
     } catch (err: any) {
