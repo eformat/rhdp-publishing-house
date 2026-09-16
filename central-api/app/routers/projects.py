@@ -1378,6 +1378,7 @@ async def _create_catalog_background(project_id: str, body: CreateCatalogRequest
             project_id,
             {
                 "repoUrl": repo_url,
+                "commitHash": commit_hash,
             }
         )
         logger.info("catalog: created catalog for %s - repo=%s", project_id, repo_url)
