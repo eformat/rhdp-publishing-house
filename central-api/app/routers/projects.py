@@ -945,6 +945,7 @@ class StartRequest(BaseModel):
     content_type: str = ""
     tags: list[str] = []
     project_description: str = ""
+    audit_trail_sha: str = ""
     sso_user: str = ""
     sso_email: str = ""
     showroom_type: str = ""
@@ -1378,7 +1379,11 @@ async def _create_catalog_background(project_id: str, body: CreateCatalogRequest
             project_id,
             {
                 "repoUrl": repo_url,
-                "commitHash": commit_hash,
+                "user": "system",
+                "stage": "intake",
+                "action": "started",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "commitSha": commit_hash,
             }
         )
         logger.info("catalog: created catalog for %s - repo=%s", project_id, repo_url)
@@ -1938,6 +1943,8 @@ async def start_workflow(
         wd["tags"] = body.tags
     if body.project_description:
         wd["projectDescription"] = body.project_description
+    if body.audit_trail_sha:
+        wd["auditTrailSha"] = body.audit_trail_sha
     if body.showroom_type:
         wd["showroomType"] = body.showroom_type
     wd["intakeType"] = body.intake_type

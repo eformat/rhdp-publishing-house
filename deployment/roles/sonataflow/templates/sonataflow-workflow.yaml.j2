@@ -174,7 +174,7 @@ spec:
               reviewHistory: [],
               notes: [],
               baselineSha: "",
-              auditTrailSha: "",
+              auditTrailSha: (.auditTrailSha // ""),
               hasDrift: false,
               epic_key: "",
               jira_url: "",
@@ -352,14 +352,8 @@ spec:
           output: |
             . + {
               repoUrl: (.catalogData.repoUrl // ""),
-              catalogRegistered: (.catalogData.catalogRegistered // false),
-              reviewHistory: ((.reviewHistory // []) + [{
-                stage: "intake",
-                action: "started",
-                timestamp: (now | tostring),
-                user: "system",
-                commitSha: (.catalogData.commitHash // "")
-              }])
+              commitHash: (.catalogData.commitHash // ""),
+              catalogRegistered: (.catalogData.catalogRegistered // false)
             } | del(.catalogData)
         transition:
           nextState: Intake
@@ -386,7 +380,8 @@ spec:
         stateDataFilter:
           input: |
             . + {
-              latestAudit: null
+              latestAudit: null,
+              reviewHistory: ((.reviewHistory // []) + [{stage: "intake", action: "started", timestamp: (now | tostring), user: "system", commitSha: (.auditTrailSha // "")}])
             }
           output: |
             . + {
