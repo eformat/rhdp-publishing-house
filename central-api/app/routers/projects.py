@@ -1023,7 +1023,7 @@ async def preintake_review(
     # Build event data (without notes)
     event_data = {
         "user": owner,
-        "stage": "preintake_review",
+        "stage": "pre_intake_review",
         "action": body.action,
         "timestamp": timestamp,
     }
