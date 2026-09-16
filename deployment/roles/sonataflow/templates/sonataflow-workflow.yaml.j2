@@ -217,37 +217,8 @@ spec:
               )
             } | del(.epicResponse)
         transition:
-          nextState: PreIntake
-      - name: PreIntake
-        type: switch
-        dataConditions:
-          - name: FirstTime
-            condition: "${ (.reviewHistory // []) | map(select(.stage == \"preintake\")) | length == 0 }"
-            transition:
-              nextState: PreIntakeInitialComplete
-          - name: NeedsUpdate
-            condition: "${ .rejection.isRejected == true }"
-            transition:
-              nextState: PreIntakeAwaitUpdate
-        defaultCondition:
-          transition:
-            nextState: PreIntakeReview
-      - name: PreIntakeInitialComplete
-        type: inject
-        data: {}
-        stateDataFilter:
-          output: |
-            . + {
-              reviewHistory: ((.reviewHistory // []) + [{
-                stage: "pre_intake",
-                action: "completed",
-                timestamp: (now | tostring),
-                user: .ssoEmail
-              }])
-            }
-        transition:
           nextState: PreIntakeReview
-      - name: PreIntakeAwaitUpdate
+      - name: PreIntake
         type: event
         exclusive: true
         onEvents:
