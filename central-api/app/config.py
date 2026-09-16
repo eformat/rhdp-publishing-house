@@ -58,8 +58,18 @@ class Settings(BaseSettings):
     # DevSpaces URL (for catalog-info.yaml template)
     devspaces_url: str = "https://devspaces.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
 
-    # Central API URL (for catalog-info.yaml template)
-    central_api_url: str = "https://central-api-publishing-house.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+    @property
+    def central_api_url(self) -> str:
+        """Derive Central API URL from OIDC issuer URL."""
+        if self.oidc_issuer_url:
+            # Extract apps domain from https://keycloak-keycloak.apps.ocpv-infra01.dal12.infra.demo.redhat.com/realms/...
+            parts = self.oidc_issuer_url.replace("https://", "").replace("http://", "").split("/")[0].split(".")
+            if len(parts) > 2:
+                # Reconstruct apps domain (everything after first subdomain)
+                apps_domain = ".".join(parts[1:])
+                return f"https://central-api-publishing-house.{apps_domain}"
+        # Fallback
+        return "https://central-api-publishing-house.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
 
     # Drift semantic cache TTL (seconds, default 3 days)
     drift_cache_ttl_seconds: int = 259200
