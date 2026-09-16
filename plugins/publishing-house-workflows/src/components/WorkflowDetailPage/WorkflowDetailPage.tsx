@@ -819,7 +819,7 @@ export function WorkflowDetailPage() {
                 <Grid item xs={12} md={6}>
                   <DetailField label="Showroom Type" value={wd?.showroomType === 'zero_touch' ? 'Zero Touch' : 'Classic'} />
                 </Grid>
-                <Grid item xs={12} md={4}>
+                <Grid item xs={12} md={6}>
                   {summary.stage === 'pre_intake' ? (
                     <>
                       <Typography className={classes.label}>Cloud Provider</Typography>
@@ -837,7 +837,7 @@ export function WorkflowDetailPage() {
                     <DetailField label="Cloud Provider" value={wd?.cloudProvider || '—'} />
                   )}
                 </Grid>
-                <Grid item xs={12} md={4}>
+                <Grid item xs={12} md={6}>
                   {summary.stage === 'pre_intake' ? (
                     <>
                       <Typography className={classes.label}>Cluster Type</Typography>
@@ -856,7 +856,7 @@ export function WorkflowDetailPage() {
                     <DetailField label="Cluster Type" value={wd?.clusterType || '—'} />
                   )}
                 </Grid>
-                <Grid item xs={12} md={4}>
+                <Grid item xs={12} md={6}>
                   {summary.stage === 'pre_intake' ? (
                     <>
                       <Typography className={classes.label}>OCP Version</Typography>
