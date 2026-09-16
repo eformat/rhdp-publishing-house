@@ -85,18 +85,17 @@ spec:
           type: boolean
           default: false
 
-        partners_access:
-          title: Should it be available to Partners?
-          type: boolean
-          default: false
-          ui:help: Check if this content should be accessible to Red Hat partners
-
       dependencies:
         ai_related:
           oneOf:
             - properties:
                 ai_related:
                   const: false
+                partners_access:
+                  title: Should it be available to Partners?
+                  type: boolean
+                  default: false
+                  ui:help: Check if this content should be accessible to Red Hat partners
             - properties:
                 ai_related:
                   const: true
@@ -111,6 +110,11 @@ spec:
                     - properties:
                         gpu_needed:
                           const: false
+                        partners_access:
+                          title: Should it be available to Partners?
+                          type: boolean
+                          default: false
+                          ui:help: Check if this content should be accessible to Red Hat partners
                     - properties:
                         gpu_needed:
                           const: true
@@ -119,6 +123,11 @@ spec:
                           type: boolean
                           default: false
                           ui:help: Check if Model-as-a-Service can substitute for GPU
+                        partners_access:
+                          title: Should it be available to Partners?
+                          type: boolean
+                          default: false
+                          ui:help: Check if this content should be accessible to Red Hat partners
 
     - title: Project Setup
       required:
