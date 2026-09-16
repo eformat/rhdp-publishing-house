@@ -265,7 +265,7 @@ def _get_workflow_data(project_id: str):
         graphql_query = {
             "query": """
                 query GetWorkflowData($businessKey: String!) {
-                    ProcessInstances(where: { businessKey: { equal: $businessKey }, state: { in: [ACTIVE, SUSPENDED] } }) {
+                    ProcessInstances(where: { businessKey: { equal: $businessKey } }) {
                         id
                         variables
                     }
