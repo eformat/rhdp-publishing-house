@@ -66,6 +66,7 @@ const PRE_INTAKE_STAGES: WorkflowStage[] = ['pre_intake', 'pre_intake_review'];
 // Expected next stages after approval/completion (matches workflow transitions)
 // Some stages can transition to multiple targets depending on decision
 const EXPECTED_NEXT_STAGES: Record<string, WorkflowStage[]> = {
+  pre_intake: ['pre_intake_review'],            // PreIntake → PreIntakeReview
   pre_intake_review: ['pre_intake', 'intake'],  // Rejected → PreIntake, Approved → Intake
   intake: ['content_review'],                   // Intake → ContentReview
   content_review: ['intake', 'infra_review'],   // Rejected → Intake, Approved → InfraReview
