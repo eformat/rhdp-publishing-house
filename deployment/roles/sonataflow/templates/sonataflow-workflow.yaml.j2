@@ -318,7 +318,7 @@ spec:
                   timestamp: .reviewAction.timestamp,
                   reasons: (.reviewAction.reasons // [])
                 }
-                else (.rejection + { isRejected: false, reasons: [(.rejection.reasons // [])[] | . + {resolved: true}] })
+                else { isRejected: false }
                 end
               )
             } | del(.reviewAction)
