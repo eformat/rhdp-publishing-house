@@ -1,6 +1,10 @@
 """Configuration settings for Central API."""
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from kubernetes import client, config as k8s_config
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -55,21 +59,42 @@ class Settings(BaseSettings):
     rcars_url: str = "https://rcars-api.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
     rcars_api_key: str = ""
 
-    # DevSpaces URL (for catalog-info.yaml template)
-    devspaces_url: str = "https://devspaces.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+    def _get_route_url(self, route_name: str, namespace: str = "publishing-house", fallback: str = "") -> str:
+        """Query OpenShift Route to get external URL."""
+        try:
+            k8s_config.load_incluster_config()
+            custom_api = client.CustomObjectsApi()
+            route = custom_api.get_namespaced_custom_object(
+                group="route.openshift.io",
+                version="v1",
+                namespace=namespace,
+                plural="routes",
+                name=route_name
+            )
+            host = route.get("spec", {}).get("host", "")
+            if host:
+                return f"https://{host}"
+        except Exception as e:
+            logger.warning(f"Failed to query route {route_name}: {e}")
+        return fallback
+
+    @property
+    def devspaces_url(self) -> str:
+        """Query DevSpaces route URL from cluster."""
+        return self._get_route_url(
+            "devspaces",
+            namespace="devspaces",
+            fallback="https://devspaces.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+        )
 
     @property
     def central_api_url(self) -> str:
-        """Derive Central API URL from OIDC issuer URL."""
-        if self.oidc_issuer_url:
-            # Extract apps domain from https://keycloak-keycloak.apps.ocpv-infra01.dal12.infra.demo.redhat.com/realms/...
-            parts = self.oidc_issuer_url.replace("https://", "").replace("http://", "").split("/")[0].split(".")
-            if len(parts) > 2:
-                # Reconstruct apps domain (everything after first subdomain)
-                apps_domain = ".".join(parts[1:])
-                return f"https://central-api-publishing-house.{apps_domain}"
-        # Fallback
-        return "https://central-api-publishing-house.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+        """Query Central API route URL from cluster."""
+        return self._get_route_url(
+            "central-api",
+            namespace="publishing-house",
+            fallback="https://central-api-publishing-house.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+        )
 
     # Drift semantic cache TTL (seconds, default 3 days)
     drift_cache_ttl_seconds: int = 259200
