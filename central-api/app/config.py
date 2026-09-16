@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     @property
     def devspaces_url(self) -> str:
         """Query DevSpaces route URL from cluster."""
-        return self._get_route_url("devspaces", namespace="devspaces")
+        return self._get_route_url("devspaces", namespace="openshift-devspaces")
 
     @property
     def central_api_url(self) -> str:
