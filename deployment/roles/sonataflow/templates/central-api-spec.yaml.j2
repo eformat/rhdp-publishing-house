@@ -81,24 +81,26 @@ paths:
                     type: boolean
       security:
         - bearerAuth: []
-  /projects/create-catalog:
+  /projects/{project_id}/create-catalog:
     post:
       operationId: createCatalog
       summary: Create GitHub repository from template, sync workflow metadata, and register Backstage catalog
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required:
-                - project_id
-                - repo_owner
               properties:
-                project_id:
-                  type: string
                 repo_owner:
                   type: string
+                  default: "rhpds"
                 collaborators:
                   type: array
                   items:
