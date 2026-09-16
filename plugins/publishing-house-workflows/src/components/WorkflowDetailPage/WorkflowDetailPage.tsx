@@ -662,53 +662,8 @@ export function WorkflowDetailPage() {
           <Tab label="Notes" />
         </Tabs>
 
-        {activeTab === 0 && !PRE_INTAKE_STAGES.includes(summary.stage) && (
-          <InfoCard title="Project Details">
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <DetailField label="Project ID" value={summary.projectId} />
-                <DetailField label="Description" value={summary.projectDescription} />
-                <DetailField label="Owner" value={summary.owner} />
-                <DetailField label="SSO User" value={summary.ssoUser} />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <DetailField label="Type" value={summary.contentType} />
-                <DetailField label="Deployment Mode" value={summary.deploymentMode} />
-                <DetailField label="Showroom Type" value={wd?.showroomType === 'zero_touch' ? 'Zero Touch' : 'Classic'} />
-                <DetailField label="Intake Type" value={summary.intakeType === 'migration' ? 'Migration' : 'New'} />
-                <DetailField label="State" value={summary.state} />
-                <DetailField label="Current Stage" value={stageLabel} />
-              </Grid>
-              <Grid item xs={12}>
-                <Typography className={classes.label}>Tags</Typography>
-                <TagEditor
-                  initialTags={summary.tags}
-                  canEdit={isContentDeveloper || isContentReviewer || isAdmin}
-                  onSave={async (tags) => {
-                    await client.updateTags(summary.projectId, tags);
-                    setRefreshKey(k => k + 1); // Refresh to show updated tags
-                  }}
-                />
-              </Grid>
-            </Grid>
-          </InfoCard>
-        )}
-
-        {activeTab === 0 && canMessage && !PRE_INTAKE_STAGES.includes(summary.stage) && (
-          <InfoCard>
-            <Button
-              variant="contained"
-              style={{ backgroundColor: '#0099FF', color: '#fff', fontWeight: 600 }}
-              size="large"
-              onClick={() => setMessageDialogOpen(true)}
-            >
-              Message
-            </Button>
-          </InfoCard>
-        )}
-
-        {/* Pre-Intake Card - Conditional based on deploymentMode */}
-        {activeTab === 0 && PRE_INTAKE_STAGES.includes(summary.stage) && (
+        {/* Unified Intake Tab - Same fields for all stages */}
+        {activeTab === 0 && (
           <>
             {summary.stage === 'pre_intake' && (
               <Alert severity="info" style={{ marginBottom: 16 }}>
