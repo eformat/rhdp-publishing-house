@@ -1248,10 +1248,11 @@ async def create_catalog(
             "central_api_url": settings.central_api_url,
         }
 
-        # Render Jinja templates in place (catalog-info.yaml and spec.yaml)
+        # Render Jinja templates in place (catalog-info.yaml, spec.yaml, README.md)
         template_files = [
             os.path.join(tmpdir, "catalog-info.yaml"),
             os.path.join(tmpdir, "publishing-house", "spec.yaml"),
+            os.path.join(tmpdir, "README.md"),
         ]
 
         for template_file in template_files:
