@@ -1200,14 +1200,6 @@ async def create_catalog(
         # Get full workflow data for template rendering
         wf_data = _get_graphql_workflow(workflow_id, settings)
 
-        # Derive cluster apps domain from RCARS URL
-        apps_domain = "apps.ocpv-infra01.dal12.infra.demo.redhat.com"  # default
-        if settings.rcars_url:
-            # Extract domain from https://rcars-api.apps.ocpv-infra01.dal12.infra.demo.redhat.com
-            rcars_parts = settings.rcars_url.replace("https://", "").replace("http://", "").split(".")
-            if len(rcars_parts) > 1:
-                apps_domain = ".".join(rcars_parts[1:])  # Skip first subdomain
-
         # Build template context from workflow data
         template_values = {
             "project_name": body.project_id,
@@ -1221,8 +1213,8 @@ async def create_catalog(
             "intake_type": wf_data.get("intakeType", "new"),
             "automation_type": wf_data.get("automationType", "ansible"),
             "repo_url": f"https://github.com/{repo_full_name}",
-            "devspaces_url": f"https://devspaces.{apps_domain}",
-            "central_api_url": f"https://central-api-publishing-house.{apps_domain}",
+            "devspaces_url": settings.devspaces_url,
+            "central_api_url": settings.central_api_url,
         }
 
         # Render Jinja templates in place (catalog-info.yaml and spec.yaml)

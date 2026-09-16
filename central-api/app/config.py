@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     rcars_url: str = "https://rcars-api.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
     rcars_api_key: str = ""
 
+    # DevSpaces URL (for catalog-info.yaml template)
+    devspaces_url: str = "https://devspaces.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+
+    # Central API URL (for catalog-info.yaml template)
+    central_api_url: str = "https://central-api-publishing-house.apps.ocpv-infra01.dal12.infra.demo.redhat.com"
+
     # Drift semantic cache TTL (seconds, default 3 days)
     drift_cache_ttl_seconds: int = 259200
 
