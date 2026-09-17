@@ -12,6 +12,8 @@ metadata:
   name: rhdp-published
   namespace: "{{ app_namespace }}"
 spec:
+  properties:
+    mp.messaging.outgoing.kogito-processinstances-events.url: http://sonataflow-platform-data-index-service.{{ app_namespace }}.svc.cluster.local/events
   flow:
     dataInputSchema:
       failOnValidationErrors: false
@@ -177,8 +179,7 @@ spec:
               auditTrailSha: (.auditTrailSha // ""),
               hasDrift: false,
               epic_key: "",
-              jira_url: "",
-              proforma_form_id: ""
+              jira_url: ""
             }
         transition:
           nextState: CreateEpic
@@ -189,7 +190,8 @@ spec:
             functionRef:
               refName: createjiraepic
               arguments:
-                fields: .
+                businessKey: .projectId
+                deploymentMode: .deploymentMode
             actionDataFilter:
               toStateData: .epicResponse
         stateDataFilter:
@@ -204,12 +206,6 @@ spec:
               jira_url: (
                 if .epicResponse
                 then .epicResponse.jira_url
-                else ""
-                end
-              ),
-              proforma_form_id: (
-                if .epicResponse
-                then .epicResponse.proforma_form_id
                 else ""
                 end
               )
@@ -319,8 +315,8 @@ spec:
               refName: updatejiraepic
               arguments:
                 epic_key: .epic_key
-                proforma_form_id: (.proforma_form_id // "")
-                fields: .
+                businessKey: .projectId
+                deploymentMode: .deploymentMode
         transition:
           nextState: CreateCatalog
       - name: CreateCatalog
@@ -331,6 +327,7 @@ spec:
               refName: createcatalog
               arguments:
                 project_id: .projectId
+                deploymentMode: .deploymentMode
                 repo_owner: "rhpds"
                 collaborators: (.teamMembers // [])
         transition:
@@ -497,9 +494,8 @@ spec:
             functionRef:
               refName: syncjiratasks
               arguments:
-                repo_url: .repoUrl
-                epic_key: .epic_key
-                slug: .projectId
+                businessKey: .projectId
+                deploymentMode: .deploymentMode
                 status: "IntakeComplete"
             actionDataFilter:
               toStateData: .jiraSyncResponse
@@ -551,9 +547,8 @@ spec:
             functionRef:
               refName: syncjiratasks
               arguments:
-                repo_url: .repoUrl
-                epic_key: .epic_key
-                slug: .projectId
+                businessKey: .projectId
+                deploymentMode: .deploymentMode
                 status: "EnvSetupComplete"
             actionDataFilter:
               toStateData: .jiraSyncResponse
@@ -597,9 +592,8 @@ spec:
             functionRef:
               refName: syncjiratasks
               arguments:
-                repo_url: .repoUrl
-                epic_key: .epic_key
-                slug: .projectId
+                businessKey: .projectId
+                deploymentMode: .deploymentMode
                 status: "DevelopmentComplete"
             actionDataFilter:
               toStateData: .jiraSyncResponse
@@ -641,9 +635,8 @@ spec:
             functionRef:
               refName: syncjiratasks
               arguments:
-                repo_url: .repoUrl
-                epic_key: .epic_key
-                slug: .projectId
+                businessKey: .projectId
+                deploymentMode: .deploymentMode
                 status: "TestingComplete"
             actionDataFilter:
               toStateData: .jiraSyncResponse
@@ -684,6 +677,8 @@ spec:
           value: "true"
         - name: KIE_FLYWAY_ENABLED
           value: "true"
+        - name: QUARKUS_REST_CLIENT_READ_TIMEOUT
+          value: "70000"
   resources:
     configMaps:
       - configMap:

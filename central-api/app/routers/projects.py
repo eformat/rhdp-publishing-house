@@ -80,6 +80,7 @@ class PreIntakeUpdateRequest(BaseModel):
 
 
 class CreateCatalogRequest(BaseModel):
+    deploymentMode: str
     repo_owner: str = "rhpds"
     collaborators: list[dict] = []
 
@@ -259,61 +260,177 @@ def _patch_workflow_data(wf_uuid: str, data: dict, settings=None) -> None:
 
 # ── Project Endpoints ─────────────────────────────────────────────────────────
 
-def _get_workflow_data(project_id: str):
-    """Internal: query workflow data — no auth check."""
+def _get_workflow_by_business_key(business_key: str) -> str:
+    """Look up workflow_id by businessKey. Returns workflow_id or raises 404."""
     settings = get_settings()
+    query = {
+        "query": """
+            query GetByBusinessKey($key: String!) {
+                ProcessInstances(where: { businessKey: { equal: $key } }) {
+                    id
+                }
+            }
+        """,
+        "variables": {"key": business_key}
+    }
+    req = urllib.request.Request(
+        f"{settings.sonataflow_graphql_url.rstrip('/')}/graphql",
+        data=json.dumps(query).encode(),
+        headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
+        result = json.loads(r.read().decode())
+    instances = result.get("data", {}).get("ProcessInstances", [])
+    if not instances:
+        raise HTTPException(status_code=404, detail=f"No workflow found for {business_key}")
+    return instances[0]["id"]
+
+
+def _get_workflow_from_runtime(business_key: str, deployment_mode: str):
+    """Query SonataFlow Runtime API for workflow instance by businessKey.
+
+    Returns workflow instance data including variables.
+    Used by endpoints called from SonataFlow workflow.
+    """
+    workflow_url = f"http://{deployment_mode}.publishing-house/{deployment_mode}?businessKey={business_key}"
+    logger.debug("_get_workflow_from_runtime: querying %s", workflow_url)
+
+    req = urllib.request.Request(workflow_url, method="GET")
+    try:
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
+            result = json.loads(r.read().decode())
+        logger.debug("_get_workflow_from_runtime: response %s", result)
+
+        if not result:
+            raise HTTPException(status_code=404, detail=f"No workflow found for businessKey={business_key}")
+
+        # Runtime API returns a list of workflow instances
+        if isinstance(result, list):
+            if len(result) == 0:
+                raise HTTPException(status_code=404, detail=f"No workflow found for businessKey={business_key}")
+            return result[0]
+
+        return result
+    except urllib.error.HTTPError as e:
+        logger.error("_get_workflow_from_runtime: HTTP %s for %s", e.code, business_key)
+        raise HTTPException(status_code=404, detail=f"No workflow found for {business_key}")
+    except Exception as e:
+        logger.error("_get_workflow_from_runtime: error querying runtime API: %s", e)
+        raise HTTPException(status_code=502, detail=f"Failed to query workflow: {e}")
+
+
+def _get_workflow_data(workflow_id: str, minimal: bool = False):
+    """Internal: query workflow data from Data Index — no auth check.
+
+    Args:
+        workflow_id: Workflow instance ID
+        minimal: If True, return only {workflow_id, businessKey, deploymentMode, stage}
+                 If False, return all workflowdata fields plus stage
+    """
+    settings = get_settings()
+    logger.debug("_get_workflow_data: workflow_id=%s minimal=%s", workflow_id, minimal)
     try:
         graphql_query = {
             "query": """
-                query GetWorkflowData($businessKey: String!) {
-                    ProcessInstances(where: { businessKey: { equal: $businessKey } }) {
+                query GetWorkflowData($id: String!) {
+                    ProcessInstances(where: { id: { equal: $id } }) {
                         id
+                        businessKey
+                        state
+                        nodes { name type enter exit }
                         variables
                     }
                 }
             """,
-            "variables": {"businessKey": project_id}
+            "variables": {"id": workflow_id}
         }
+        graphql_url = f"{settings.sonataflow_graphql_url.rstrip('/')}/graphql"
+        logger.debug("_get_workflow_data: querying %s", graphql_url)
         req = urllib.request.Request(
-            f"{settings.sonataflow_graphql_url.rstrip('/')}/graphql",
+            graphql_url,
             data=json.dumps(graphql_query).encode(),
             headers={"Content-Type": "application/json"}
         )
         with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
             result = json.loads(r.read().decode())
+        logger.debug("_get_workflow_data: GraphQL response: %s", result)
         instances = result.get("data", {}).get("ProcessInstances", [])
+        logger.debug("_get_workflow_data: found %d instance(s)", len(instances))
         if not instances:
-            raise HTTPException(status_code=404, detail=f"No workflow found for {project_id}")
+            raise HTTPException(status_code=404, detail=f"No workflow found for {workflow_id}")
+
         inst = instances[0]
         variables = inst.get("variables", {})
         wd = variables.get("workflowdata", {}) if isinstance(variables, dict) else {}
-        rejection = wd.get("rejection") or variables.get("rejection")
-        result = {
-            "project_id": project_id,
-            "workflow_id": inst.get("id", ""),
-            "epic_key": wd.get("epic_key", ""),
-            "baselineSha": wd.get("baselineSha", ""),
-            "hasDrift": wd.get("hasDrift", False),
-            "repoUrl": wd.get("repoUrl", ""),
-            "agnosticvUrls": wd.get("agnosticvUrls", []),
-            "ciUrls": wd.get("ciUrls", []),
-        }
-        if rejection and rejection.get("isRejected"):
-            result["rejection"] = rejection
-        return result
+
+        # Calculate stage from process state and nodes
+        process_state = inst.get("state", "")
+        if process_state == "COMPLETED":
+            stage = "published"
+        elif process_state == "ERROR":
+            stage = "error"
+        else:
+            stage = "intake"
+            latest_enter = ""
+            for node in inst.get("nodes", []):
+                if node.get("type") != "CompositeContextNode":
+                    continue
+                if not node.get("enter") or node.get("exit"):
+                    continue
+                candidate = _STATE_MAP.get(node.get("name", "").lower())
+                if candidate and node["enter"] > latest_enter:
+                    stage = candidate
+                    latest_enter = node["enter"]
+
+        # Return minimal or full data
+        if minimal:
+            return {
+                "workflow_id": workflow_id,
+                "businessKey": inst.get("businessKey", ""),
+                "deploymentMode": wd.get("deploymentMode", ""),
+                "stage": stage,
+            }
+        else:
+            # Return ALL workflow data fields plus stage
+            # Spread first, then override with our canonical values
+            return {
+                **wd,
+                "workflow_id": workflow_id,
+                "stage": stage,
+            }
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning("workflow-data failed for %s: %s", project_id, e)
+        logger.warning("workflow-data failed for %s: %s", workflow_id, e)
         raise HTTPException(status_code=502, detail=f"Failed to query workflow: {e}")
 
 
-@router.get("/{project_id}/workflow-data")
-def get_workflow_data(project_id: str, auth: tuple[str, int] = Depends(_require_auth)):
-    """Return workflow data subset (epic_key, jira_url)."""
+@router.get("/{workflow_id}/workflow-data")
+def get_workflow_data(workflow_id: str, minimal: bool = False, auth: tuple[str, int] = Depends(_require_auth)):
+    """Return workflow data from Data Index.
+
+    Query params:
+        minimal: If true, return only businessKey, deploymentMode, and stage
+    """
     _owner, groups = auth
     _require_group(groups, GROUP_BITS["rhdp-developers"], "rhdp-developers")
-    return _get_workflow_data(project_id)
+    return _get_workflow_data(workflow_id, minimal=minimal)
+
+
+@router.get("/by-slug/{slug}/workflow-data")
+def get_workflow_data_by_slug(slug: str, minimal: bool = False, auth: tuple[str, int] = Depends(_require_auth)):
+    """Return workflow data from Data Index by project slug.
+
+    Used by DevSpaces tools that only have the project slug from spec.yaml.
+    Resolves slug → workflow_id, then returns workflow data.
+
+    Query params:
+        minimal: If true, return only businessKey, deploymentMode, and stage
+    """
+    _owner, groups = auth
+    _require_group(groups, GROUP_BITS["rhdp-developers"], "rhdp-developers")
+    workflow_id = _get_workflow_by_business_key(slug)
+    return _get_workflow_data(workflow_id, minimal=minimal)
 
 
 _STATE_MAP = {
@@ -372,72 +489,10 @@ def _get_graphql_workflow(workflow_id: str, settings):
         return {}
 
 
-def _get_workflow_state(workflow_id: str):
-    """Internal: query workflow state — no auth check."""
-    settings = get_settings()
-    try:
-        graphql_query = {
-            "query": """
-                query GetWorkflowById($id: String!) {
-                    ProcessInstances(where: { id: { equal: $id } }) {
-                        id
-                        state
-                        nodes { name type enter exit }
-                    }
-                }
-            """,
-            "variables": {"id": workflow_id}
-        }
-        req = urllib.request.Request(
-            f"{settings.sonataflow_graphql_url.rstrip('/')}/graphql",
-            data=json.dumps(graphql_query).encode(),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
-            result = json.loads(r.read().decode())
-        instances = result.get("data", {}).get("ProcessInstances", [])
-        inst = instances[0] if instances else None
-        if inst:
-            process_state = inst.get("state", "")
-
-            if process_state == "COMPLETED":
-                stage = "published"
-            elif process_state == "ERROR":
-                stage = "error"
-            else:
-                stage = "intake"
-                latest_enter = ""
-                for node in inst.get("nodes", []):
-                    if node.get("type") != "CompositeContextNode":
-                        continue
-                    if not node.get("enter") or node.get("exit"):
-                        continue
-                    candidate = _STATE_MAP.get(node.get("name", "").lower())
-                    if candidate and node["enter"] > latest_enter:
-                        stage = candidate
-                        latest_enter = node["enter"]
-
-            return {
-                "stage": stage,
-                "workflow_id": workflow_id,
-                "source": "sonataflow",
-            }
-    except Exception as e:
-        logger.warning("workflow-state fallback for %s: %s", workflow_id, e)
-    return {"stage": "intake", "workflow_id": workflow_id, "source": "fallback"}
-
-
-@router.get("/workflow-state/{workflow_id}")
-def get_workflow_state(workflow_id: str, auth: tuple[str, int] = Depends(_require_auth)):
-    """Return semantic workflow stage by process instance UUID."""
-    _owner, groups = auth
-    _require_group(groups, GROUP_BITS["rhdp-developers"], "rhdp-developers")
-    return _get_workflow_state(workflow_id)
-
-
 def _require_stage(workflow_id: str, allowed: list[str]) -> str:
     """Check the workflow stage and raise 409 if not in allowed list."""
-    current = _get_workflow_state(workflow_id).get("stage", "unknown")
+    data = _get_workflow_data(workflow_id, minimal=True)
+    current = data.get("stage", "unknown")
     if current not in allowed:
         raise HTTPException(
             status_code=409,
@@ -544,12 +599,10 @@ async def start_workflow(
     # deploymentMode already uses hyphen format (rhdp-published, field-source)
     workflow_type = body.deploymentMode
 
-    # Start SonataFlow workflow instance with businessKey via proxy
-    # Proxy routes to correct workflow based on X-Workflow-Type header
-    workflow_url = f"{settings.sonataflow_url.rstrip('/')}/{workflow_type}?businessKey={project_name}"
+    # Start SonataFlow workflow instance directly on the workflow service
+    workflow_url = f"http://{workflow_type}.publishing-house/{workflow_type}?businessKey={project_name}"
     headers = {
         "Content-Type": "application/json",
-        "X-Workflow-Type": workflow_type,
     }
 
     req = urllib.request.Request(
@@ -576,9 +629,9 @@ async def start_workflow(
     )
 
 
-@router.post("/intake/{project_slug}", response_model=IntakeResponse)
+@router.post("/{workflow_id}/intake", response_model=IntakeResponse)
 async def submit_intake(
-    project_slug: str,
+    workflow_id: str,
     body: IntakeRequest,
     auth: tuple[str, int] = Depends(_require_auth),
     x_github_user: str | None = Header(None, alias="X-GitHub-User"),
@@ -603,22 +656,23 @@ async def submit_intake(
     try:
         # Look up workflow
         try:
-            wd = _get_workflow_data(project_slug)
+            wd = _get_workflow_data(workflow_id)
         except HTTPException as e:
             if e.status_code == 404:
                 return JSONResponse(status_code=404, content=IntakeResponse(
-                    status=404, error=f"No workflow found for {project_slug}",
+                    status=404, error=f"No workflow found for {workflow_id}",
                 ).model_dump())
             raise
 
         wf_uuid = wd.get("workflow_id", "")
+        project_slug = wd.get("projectId", workflow_id)
         if not wf_uuid:
             return JSONResponse(status_code=404, content=IntakeResponse(
-                status=404, error=f"No workflow found for {project_slug}",
+                status=404, error=f"No workflow found for {workflow_id}",
             ).model_dump())
 
         # Check stage
-        current = _get_workflow_state(wf_uuid).get("stage", "unknown")
+        current = _get_workflow_data(wf_uuid, minimal=True).get("stage", "unknown")
         stage = current
         if current != "intake":
             return JSONResponse(status_code=409, content=IntakeResponse(
@@ -649,7 +703,7 @@ async def submit_intake(
             project_slug, wf_uuid, owner, stage="intake",
             commit_sha=result.commit_sha, settings=settings,
         )
-        logger.info("intake: submitted for %s", project_slug)
+        logger.info("intake: submitted for %s (workflow %s)", project_slug, workflow_id)
 
         epic_key = wd.get("epic_key", "")
         if epic_key and settings.jira_url:
@@ -674,9 +728,9 @@ async def submit_intake(
         ).model_dump())
 
 
-@router.post("/development/{project_slug}", response_model=DevelopmentResponse)
+@router.post("/{workflow_id}/development", response_model=DevelopmentResponse)
 async def submit_development(
-    project_slug: str,
+    workflow_id: str,
     body: DevelopmentRequest,
     auth: tuple[str, int] = Depends(_require_auth),
     x_github_user: str | None = Header(None, alias="X-GitHub-User"),
@@ -701,21 +755,22 @@ async def submit_development(
 
     try:
         try:
-            wd = _get_workflow_data(project_slug)
+            wd = _get_workflow_data(workflow_id)
         except HTTPException as e:
             if e.status_code == 404:
                 return JSONResponse(status_code=404, content=DevelopmentResponse(
-                    status=404, error=f"No workflow found for {project_slug}",
+                    status=404, error=f"No workflow found for {workflow_id}",
                 ).model_dump())
             raise
 
         wf_uuid = wd.get("workflow_id", "")
+        project_slug = wd.get("projectId", workflow_id)
         if not wf_uuid:
             return JSONResponse(status_code=404, content=DevelopmentResponse(
-                status=404, error=f"No workflow found for {project_slug}",
+                status=404, error=f"No workflow found for {workflow_id}",
             ).model_dump())
 
-        current = _get_workflow_state(wf_uuid).get("stage", "unknown")
+        current = _get_workflow_data(wf_uuid, minimal=True).get("stage", "unknown")
         stage = current
         if current != "development":
             return JSONResponse(status_code=409, content=DevelopmentResponse(
@@ -845,7 +900,7 @@ async def submit_testing(
                 status=404, error=f"No workflow found for {project_slug}",
             ).model_dump())
 
-        current = _get_workflow_state(wf_uuid).get("stage", "unknown")
+        current = _get_workflow_data(wf_uuid, minimal=True).get("stage", "unknown")
         stage = current
         if current != "testing":
             return JSONResponse(status_code=409, content=TestingResponse(
@@ -959,22 +1014,44 @@ class StartRequest(BaseModel):
     intake_type: str = "new"
 
 
-def _send_cloud_event(event_type: str, project_slug: str, data: dict):
-    """Send a CloudEvent to SonataFlow."""
+def _send_cloud_event(event_type: str, workflow_id: str, data: dict):
+    """Send a CloudEvent to SonataFlow.
+
+    Queries Data Index to get businessKey and deploymentMode, then routes
+    CloudEvent to the specific workflow service (http://{deploymentMode}).
+    """
     settings = get_settings()
+    logger.debug("_send_cloud_event: event_type=%s workflow_id=%s", event_type, workflow_id)
+
+    # Query Data Index for businessKey and deploymentMode
+    wd = _get_workflow_data(workflow_id, minimal=True)
+    business_key = wd.get("businessKey", "")
+    deployment_mode = wd.get("deploymentMode", "")
+
+    if not business_key or not deployment_mode:
+        logger.warning("_send_cloud_event: missing businessKey or deploymentMode for workflow %s", workflow_id)
+        raise HTTPException(status_code=500, detail="Cannot send CloudEvent: missing workflow metadata")
+
+    logger.debug("_send_cloud_event: businessKey=%s deploymentMode=%s", business_key, deployment_mode)
+
     cloud_event = {
         "specversion": "1.0",
         "type": event_type,
         "source": "publishing-house",
         "id": str(uuid.uuid4()),
-        "kogitobusinesskey": project_slug,
-        "projectid": project_slug,
+        "kogitobusinesskey": business_key,
+        "projectid": business_key,
         "datacontenttype": "application/json",
         "data": data,
     }
+
+    # Route to specific workflow service
+    workflow_url = f"http://{deployment_mode}.publishing-house"
+    logger.debug("_send_cloud_event: sending to %s", workflow_url)
+
     payload = json.dumps(cloud_event).encode()
     req = urllib.request.Request(
-        f"{settings.sonataflow_url.rstrip('/')}",
+        workflow_url,
         data=payload,
         headers={"Content-Type": "application/cloudevents+json"},
     )
@@ -983,17 +1060,19 @@ def _send_cloud_event(event_type: str, project_slug: str, data: dict):
             pass
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")
-        logger.warning("cloud event %s for %s returned %s: %s", event_type, project_slug, e.code, body[:500])
+        logger.warning("cloud event %s for %s returned %s: %s", event_type, workflow_id, e.code, body[:500])
+        raise HTTPException(status_code=502, detail=f"CloudEvent failed: {e.code} {body[:200]}")
     except Exception as e:
-        logger.warning("cloud event %s send error for %s: %s", event_type, project_slug, e)
-    logger.info("sent %s for %s", event_type, project_slug)
+        logger.warning("cloud event %s send error for %s: %s", event_type, workflow_id, e)
+        raise HTTPException(status_code=502, detail=f"CloudEvent failed: {e}")
+    logger.info("sent %s for workflow %s (businessKey=%s)", event_type, workflow_id, business_key)
 
 
 # ── Pre-Intake Review ──────────────────────────────────────────────────────
 
-@router.post("/{slug}/preintake")
+@router.post("/{workflow_id}/preintake")
 async def preintake_review(
-    slug: str,
+    workflow_id: str,
     body: PreIntakeRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
@@ -1006,10 +1085,8 @@ async def preintake_review(
         "rhdp-preintake-review or rhdp-administrators"
     )
 
-    wd = _get_workflow_data(slug)
-    wf_uuid = wd.get("workflow_id", "")
-    if not wf_uuid:
-        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+    wd = _get_workflow_data(workflow_id)
+    wf_uuid = workflow_id
 
     _require_stage(wf_uuid, ["pre_intake_review"])
 
@@ -1076,20 +1153,20 @@ async def preintake_review(
     }
     event_type = event_type_map[body.action]
 
-    _send_cloud_event(event_type, slug, event_data)
+    _send_cloud_event(event_type, wf_uuid, event_data)
 
-    logger.info("pre-intake %s by %s for %s", body.action, owner, slug)
+    logger.info("pre-intake %s by %s for %s", body.action, owner, workflow_id)
 
     return PreIntakeResponse(
         status="success",
-        project_id=slug,
+        project_id=wd.get("projectId", workflow_id),
         action=body.action
     )
 
 
-@router.post("/{slug}/preintake/update")
+@router.post("/{workflow_id}/preintake/update")
 async def submit_preintake_update(
-    slug: str,
+    workflow_id: str,
     body: PreIntakeUpdateRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
@@ -1097,10 +1174,8 @@ async def submit_preintake_update(
     Available to the project owner (developer) to make corrections."""
     owner, groups = auth
 
-    wd = _get_workflow_data(slug)
-    wf_uuid = wd.get("workflow_id", "")
-    if not wf_uuid:
-        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+    wd = _get_workflow_data(workflow_id)
+    wf_uuid = workflow_id
 
     _require_stage(wf_uuid, ["pre_intake"])
 
@@ -1118,14 +1193,14 @@ async def submit_preintake_update(
     # will assign the entire data object to .updatedFields
     event_data = updated_fields
 
-    _send_cloud_event("ph.preintake.submitted", slug, event_data)
+    _send_cloud_event("ph.preintake.submitted", wf_uuid, event_data)
 
-    logger.info("pre-intake submitted by %s for %s with %d fields: %s", owner, slug, len(updated_fields), list(updated_fields.keys()))
+    logger.info("pre-intake submitted by %s for %s with %d fields: %s", owner, workflow_id, len(updated_fields), list(updated_fields.keys()))
     logger.info("contentOutline value: %s", updated_fields.get('contentOutline', 'NOT IN FIELDS')[:200] if 'contentOutline' in updated_fields else 'NOT IN FIELDS')
 
     return PreIntakeResponse(
         status="success",
-        project_id=slug,
+        project_id=wd.get("projectId", workflow_id),
         action="update_submitted"
     )
 
@@ -1135,7 +1210,7 @@ async def submit_preintake_update(
 @router.post("/{project_id}/create-catalog", status_code=202)
 async def create_catalog(
     project_id: str,
-    body: CreateCatalogRequest = CreateCatalogRequest(),
+    body: CreateCatalogRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
     """Create GitHub repo from template, sync workflow metadata, and register Backstage catalog.
@@ -1159,6 +1234,16 @@ async def _create_catalog_background(project_id: str, body: CreateCatalogRequest
             logger.error("github: token not configured for %s", project_id)
             return
 
+        # Query Runtime API for workflow data
+        try:
+            workflow_instance = _get_workflow_from_runtime(project_id, body.deploymentMode)
+            workflow_id = workflow_instance.get("id", "")
+            # Runtime API returns workflowdata directly, not under variables
+            wd = workflow_instance.get("workflowdata", {})
+        except Exception as e:
+            logger.error("catalog: failed to query workflow for %s: %s", project_id, e)
+            return
+
         # Parse template repo URL from config
         template_url = settings.github_template_repo.replace("https://github.com/", "").replace(".git", "")
         template_parts = template_url.split("/")
@@ -1168,10 +1253,8 @@ async def _create_catalog_background(project_id: str, body: CreateCatalogRequest
 
         template_owner, template_name = template_parts
 
-        # Get workflow data for syncing
-        wd_result = _get_workflow_data(project_id)
-        workflow_id = wd_result.get("workflow_id", "")
-        epic_key = wd_result.get("epic_key", "")
+        # Extract needed fields from workflow data
+        epic_key = wd.get("epic_key", "")
         jira_url = f"https://redhat.atlassian.net/browse/{epic_key}" if epic_key else ""
 
         # Create repo from template using GitHub API
@@ -1264,6 +1347,7 @@ async def _create_catalog_background(project_id: str, body: CreateCatalogRequest
             # Build template context from workflow data
             template_values = {
                 "project_name": project_id,
+                "workflow_id": workflow_id,
                 "user_email": wf_data.get("ssoEmail", ""),
                 "github_user": wf_data.get("ssoUser", ""),
                 "project_description": wf_data.get("projectDescription", ""),
@@ -1383,7 +1467,7 @@ async def _create_catalog_background(project_id: str, body: CreateCatalogRequest
         # Send ph.catalog.created CloudEvent to SonataFlow
         _send_cloud_event(
             "ph.catalog.created",
-            project_id,
+            workflow_id,
             {
                 "repoUrl": repo_url,
                 "user": "system",
@@ -1401,19 +1485,17 @@ async def _create_catalog_background(project_id: str, body: CreateCatalogRequest
 
 # ── Content Review ──────────────────────────────────────────────────────────
 
-@router.post("/{slug}/content-review/approve")
+@router.post("/{workflow_id}/content-review/approve")
 async def approve_content_review(
-    slug: str,
+    workflow_id: str,
     body: ApproveRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
     owner, groups = auth
     _require_group(groups, GROUP_BITS["rhdp-content-review"] | GROUP_BITS["rhdp-administrators"], "rhdp-content-review or rhdp-administrators")
 
-    wd = _get_workflow_data(slug)
-    wf_uuid = wd.get("workflow_id", "")
-    if not wf_uuid:
-        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+    wd = _get_workflow_data(workflow_id)
+    wf_uuid = workflow_id
     _require_stage(wf_uuid, ["content_review"])
 
     settings = get_settings()
@@ -1460,7 +1542,7 @@ async def approve_content_review(
             updated_notes = existing_notes + approval_notes
             _patch_workflow_data(wf_uuid, {"notes": updated_notes}, settings=settings)
 
-    _send_cloud_event("ph.content-review.complete", slug, {
+    _send_cloud_event("ph.content-review.complete", wf_uuid, {
         "user": owner,
         "stage": "content_review",
         "action": "approved",
@@ -1476,22 +1558,20 @@ async def approve_content_review(
             epic_key, "rhdp-infra-review", settings,
         )
 
-    return {"slug": slug, "action": "approved", "stage": "content_review"}
+    return {"slug": wd.get("projectId", workflow_id), "action": "approved", "stage": "content_review"}
 
 
-@router.post("/{slug}/content-review/reject")
+@router.post("/{workflow_id}/content-review/reject")
 async def reject_content_review(
-    slug: str,
+    workflow_id: str,
     body: RejectRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
     owner, groups = auth
     _require_group(groups, GROUP_BITS["rhdp-content-review"] | GROUP_BITS["rhdp-administrators"], "rhdp-content-review or rhdp-administrators")
 
-    wd = _get_workflow_data(slug)
-    wf_uuid = wd.get("workflow_id", "")
-    if not wf_uuid:
-        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+    wd = _get_workflow_data(workflow_id)
+    wf_uuid = workflow_id
     _require_stage(wf_uuid, ["content_review"])
 
     reasons = [{**r, "id": str(uuid.uuid4()), "resolved": False} for r in body.reasons]
@@ -1539,7 +1619,7 @@ async def reject_content_review(
     _patch_workflow_data(wf_uuid, {"notes": updated_notes}, settings=settings)
 
     # Send CloudEvent to trigger state transition
-    _send_cloud_event("ph.content-review.rejected", slug, {
+    _send_cloud_event("ph.content-review.rejected", wf_uuid, {
         "user": reviewer,
         "stage": "content_review",
         "action": "rejected",
@@ -1547,24 +1627,22 @@ async def reject_content_review(
         "commitSha": body.commit_sha,
         "reasons": reasons,
     })
-    return {"slug": slug, "action": "rejected", "stage": "content_review"}
+    return {"slug": wd.get("projectId", workflow_id), "action": "rejected", "stage": "content_review"}
 
 
 # ── Infra Review ────────────────────────────────────────────────────────────
 
-@router.post("/{slug}/infra-review/approve")
+@router.post("/{workflow_id}/infra-review/approve")
 async def approve_infra_review(
-    slug: str,
+    workflow_id: str,
     body: ApproveRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
     owner, groups = auth
     _require_group(groups, GROUP_BITS["rhdp-infra-review"] | GROUP_BITS["rhdp-administrators"], "rhdp-infra-review or rhdp-administrators")
 
-    wd = _get_workflow_data(slug)
-    wf_uuid = wd.get("workflow_id", "")
-    if not wf_uuid:
-        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+    wd = _get_workflow_data(workflow_id)
+    wf_uuid = workflow_id
     _require_stage(wf_uuid, ["infra_review"])
 
     settings = get_settings()
@@ -1611,29 +1689,27 @@ async def approve_infra_review(
             updated_notes = existing_notes + approval_notes
             _patch_workflow_data(wf_uuid, {"notes": updated_notes}, settings=settings)
 
-    _send_cloud_event("ph.infra-review.complete", slug, {
+    _send_cloud_event("ph.infra-review.complete", wf_uuid, {
         "user": owner,
         "stage": "infra_review",
         "action": "approved",
         "timestamp": timestamp,
         "commitSha": body.commit_sha,
     })
-    return {"slug": slug, "action": "approved", "stage": "infra_review"}
+    return {"slug": wd.get("projectId", workflow_id), "action": "approved", "stage": "infra_review"}
 
 
-@router.post("/{slug}/infra-review/reject")
+@router.post("/{workflow_id}/infra-review/reject")
 async def reject_infra_review(
-    slug: str,
+    workflow_id: str,
     body: RejectRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
     owner, groups = auth
     _require_group(groups, GROUP_BITS["rhdp-infra-review"] | GROUP_BITS["rhdp-administrators"], "rhdp-infra-review or rhdp-administrators")
 
-    wd = _get_workflow_data(slug)
-    wf_uuid = wd.get("workflow_id", "")
-    if not wf_uuid:
-        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+    wd = _get_workflow_data(workflow_id)
+    wf_uuid = workflow_id
     _require_stage(wf_uuid, ["infra_review"])
 
     reasons = [{**r, "id": str(uuid.uuid4()), "resolved": False} for r in body.reasons]
@@ -1681,7 +1757,7 @@ async def reject_infra_review(
     _patch_workflow_data(wf_uuid, {"notes": updated_notes}, settings=settings)
 
     # Send CloudEvent to trigger state transition
-    _send_cloud_event("ph.infra-review.rejected", slug, {
+    _send_cloud_event("ph.infra-review.rejected", wf_uuid, {
         "user": reviewer,
         "stage": "infra_review",
         "action": "rejected",
@@ -1689,7 +1765,7 @@ async def reject_infra_review(
         "commitSha": body.commit_sha,
         "reasons": reasons,
     })
-    return {"slug": slug, "action": "rejected", "stage": "infra_review"}
+    return {"slug": wd.get("projectId", workflow_id), "action": "rejected", "stage": "infra_review"}
 
 
 # ── Add Note ───────────────────────────────────────────────────────────────
@@ -1698,22 +1774,19 @@ class AddNoteRequest(BaseModel):
     text: str
 
 
-@router.post("/{slug}/notes")
+@router.post("/{workflow_id}/notes")
 async def add_note(
-    slug: str,
+    workflow_id: str,
     body: AddNoteRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
     owner, groups = auth
     _require_group(groups, ALL_GROUPS_MASK, "any RHDP group")
 
-    wd = _get_workflow_data(slug)
-    wf_uuid = wd.get("workflow_id", "")
-    if not wf_uuid:
-        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+    wf_uuid = workflow_id
 
     # Get current stage from workflow
-    stage = _get_workflow_state(wf_uuid).get("stage", "unknown")
+    stage = _get_workflow_data(wf_uuid, minimal=True).get("stage", "unknown")
 
     # Get current workflow data
     query = """
@@ -1742,6 +1815,7 @@ async def add_note(
             variables = instances[0].get("variables", {})
             workflowdata = variables.get("workflowdata", {})
             notes = workflowdata.get("notes", [])
+            project_id = workflowdata.get("projectId", workflow_id)
 
             # Add new note
             new_note = {
@@ -1760,13 +1834,13 @@ async def add_note(
         raise
     except urllib.error.HTTPError as e:
         body_text = e.read().decode(errors="replace")
-        logger.warning("Note add failed for %s: %s %s", slug, e.code, body_text[:500])
+        logger.warning("Note add failed for %s: %s %s", workflow_id, e.code, body_text[:500])
         raise HTTPException(status_code=502, detail=f"Failed to update workflow: {e.code}")
     except Exception as e:
-        logger.warning("Note add failed for %s: %s", slug, e)
+        logger.warning("Note add failed for %s: %s", workflow_id, e)
         raise HTTPException(status_code=502, detail=f"Failed to update workflow: {e}")
 
-    return {"slug": slug, "action": "note_added"}
+    return {"slug": project_id, "action": "note_added"}
 
 
 # ── Jira CI Ticket Helpers ─────────────────────────────────────────────────
@@ -1779,19 +1853,17 @@ class EnvSetupSubmitRequest(BaseModel):
     ci_urls: list[str]
 
 
-@router.post("/{slug}/env-setup/submit")
+@router.post("/{workflow_id}/env-setup/submit")
 async def submit_env_setup(
-    slug: str,
+    workflow_id: str,
     body: EnvSetupSubmitRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
     owner, groups = auth
     _require_group(groups, GROUP_BITS["rhdp-content-developers"], "rhdp-content-developers")
 
-    wd = _get_workflow_data(slug)
-    wf_uuid = wd.get("workflow_id", "")
-    if not wf_uuid:
-        raise HTTPException(status_code=404, detail=f"No workflow found for {slug}")
+    wd = _get_workflow_data(workflow_id)
+    wf_uuid = workflow_id
     _require_stage(wf_uuid, ["env_setup"])
 
     # Validate AgnosticV URLs — each must point to a folder with common.yaml and dev.yaml
@@ -1816,7 +1888,7 @@ async def submit_env_setup(
         if errors:
             raise HTTPException(status_code=422, detail="; ".join(errors))
 
-    _send_cloud_event("ph.env-setup.complete", slug, {
+    _send_cloud_event("ph.env-setup.complete", wf_uuid, {
         "user": owner,
         "stage": "env_setup",
         "action": "submitted",
@@ -1825,14 +1897,14 @@ async def submit_env_setup(
         "ciUrls": body.ci_urls,
     })
 
-    return {"slug": slug, "action": "submitted", "stage": "env_setup"}
+    return {"slug": wd.get("projectId", workflow_id), "action": "submitted", "stage": "env_setup"}
 
 
 # ── Drift Approve ───────────────────────────────────────────────────────────
 
-@router.post("/{slug}/drift/approve")
+@router.post("/{workflow_id}/drift/approve")
 async def approve_drift(
-    slug: str,
+    workflow_id: str,
     body: ApproveRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
@@ -1843,9 +1915,8 @@ async def approve_drift(
     if not settings.github_token:
         raise HTTPException(status_code=500, detail="GITHUB_TOKEN not configured on Central API")
 
-    wd = _get_workflow_data(slug)
-    if not wd or not wd.get("workflow_id"):
-        raise HTTPException(status_code=404, detail=f"No active workflow found for '{slug}'")
+    wd = _get_workflow_data(workflow_id)
+    wf_uuid = workflow_id
 
     repo_url = wd.get("repoUrl", "")
     if not repo_url:
@@ -1982,9 +2053,9 @@ class UpdateTagsRequest(BaseModel):
     tags: list[str]
 
 
-@router.patch("/{slug}/tags")
+@router.patch("/{workflow_id}/tags")
 async def update_tags(
-    slug: str,
+    workflow_id: str,
     body: UpdateTagsRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
@@ -2017,12 +2088,8 @@ async def update_tags(
     # Remove duplicates and sort
     unique_tags = sorted(list(set(body.tags)))
 
-    # Get workflow ID from project slug
-    wd = _get_workflow_data(slug)
-    workflow_id = wd.get("workflow_id")
-
-    if not workflow_id:
-        raise HTTPException(status_code=404, detail=f"No active workflow found for project '{slug}'")
+    wd = _get_workflow_data(workflow_id, minimal=True)
+    slug = wd.get("projectId", workflow_id)
 
     # Update SonataFlow workflow data with new tags
     # This merges tags into workflowdata and persists to PostgreSQL

@@ -24,7 +24,7 @@ def _extract_module_map(text: str) -> list[dict]:
     return modules
 
 
-def run_checks(design_text: str | None, policy: dict) -> list[CheckResult]:
+def run_checks(design_text: str | None, policy: dict, spec_data: dict | None = None) -> list[CheckResult]:
     results = []
 
     if not design_text:
@@ -56,14 +56,39 @@ def run_checks(design_text: str | None, policy: dict) -> list[CheckResult]:
             field="publishing-house/spec/design.md",
         ))
 
-    # D-02: All 11 required sections present
+    # D-02: All required sections present (with conditional logic for some)
     required_sections = policy.get("required_design_sections", [])
+    conditional_sections = policy.get("conditional_required_sections", [])
     headings = [m.group(1).strip().lower() for m in re.finditer(r"^#{2,3}\s+(.+)$", design_text, re.MULTILINE)]
 
+    # Get project metadata for conditional checks
+    content_type = spec_data.get("project", {}).get("content_type", "") if spec_data else ""
+    showroom_type = spec_data.get("project", {}).get("showroom_type", "") if spec_data else ""
+
     missing = []
+    total_expected = 0
+
     for section in required_sections:
-        if not any(section.lower() in h for h in headings):
-            missing.append(section)
+        has_section = any(section.lower() in h for h in headings)
+
+        # Check if this section has conditional requirements
+        if section.lower() in [s.lower() for s in conditional_sections]:
+            # Apply conditional logic
+            # Assessment strategy is optional for demos or classic labs
+            if section.lower() == "assessment strategy":
+                is_optional = (
+                    content_type == "demo" or
+                    (content_type == "lab" and showroom_type == "classic")
+                )
+                if not is_optional:
+                    total_expected += 1
+                    if not has_section:
+                        missing.append(section)
+        else:
+            # Unconditionally required
+            total_expected += 1
+            if not has_section:
+                missing.append(section)
 
     if missing:
         results.append(CheckResult(
@@ -74,7 +99,7 @@ def run_checks(design_text: str | None, policy: dict) -> list[CheckResult]:
     else:
         results.append(CheckResult(
             check_id="D-02", group="D", status=CheckStatus.PASS,
-            message=f"All {len(required_sections)} required sections present",
+            message=f"All {total_expected} required sections present",
             field="publishing-house/spec/design.md",
         ))
 

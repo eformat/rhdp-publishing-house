@@ -5,12 +5,13 @@ import json
 import logging
 import re
 import ssl
+import time
 import urllib.parse
 import urllib.request
 import uuid
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
@@ -28,19 +29,19 @@ _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 
 class CreateEpicRequest(BaseModel):
-    fields: dict    # All template fields as key-value pairs
+    businessKey: str  # Project ID used as workflow business key
+    deploymentMode: str  # Workflow type (rhdp-published, field-source, etc.)
 
 
 class CreateEpicResponse(BaseModel):
     epic_key: str
     jira_url: str
-    proforma_form_id: str = ""
 
 
 class UpdateEpicRequest(BaseModel):
     epic_key: str
-    proforma_form_id: str = ""
-    fields: dict = {}  # Fallback if no ProForma
+    businessKey: str  # Project ID used as workflow business key
+    deploymentMode: str  # Workflow type (rhdp-published, field-source, etc.)
 
 
 class UpdateEpicResponse(BaseModel):
@@ -526,34 +527,144 @@ def _create_proforma_form(epic_key: str, epic_type: str, fields: dict, settings:
         return ""
 
 
+def _get_workflow_data_by_business_key(business_key: str, deployment_mode: str, settings: Settings) -> dict:
+    """Query SonataFlow runtime API to get workflow data by business key.
+    This is instant - no Data Index sync lag."""
+    # deploymentMode is already in correct format (rhdp-published)
+    workflow_name = deployment_mode
+
+    # Build workflow URL - same namespace, so just use service name
+    # e.g., http://rhdp-published/rhdp-published?businessKey=ph-test
+    try:
+        # Query SonataFlow runtime API by business key
+        url = f"http://{workflow_name}/{workflow_name}?businessKey={business_key}"
+        req = urllib.request.Request(url, headers={"Accept": "application/json"}, method="GET")
+
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
+            response_data = json.loads(r.read().decode())
+
+            # Response is an array of workflow instances matching the business key
+            if not response_data or not isinstance(response_data, list) or len(response_data) == 0:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Workflow not found for business key: {business_key}"
+                )
+
+            # Get the most recent instance (last in array)
+            instance = response_data[-1]
+            workflow_data = instance.get("workflowdata", instance)
+
+            logger.info("Retrieved workflow data for business key %s from %s (instant)", business_key, workflow_name)
+            return workflow_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to query SonataFlow runtime API for business key %s: %s", business_key, e)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to query workflow runtime API: {e}"
+        )
+
+
+def _get_workflow_data(workflow_instance_id: str, settings: Settings) -> dict:
+    """Query Data Index to get workflow data from workflow instance ID.
+    Retries up to 5 times with 1-second delay to handle Data Index sync lag."""
+    query = """
+    query GetWorkflowData($id: String!) {
+      ProcessInstances(where: { id: { equal: $id } }) {
+        variables
+      }
+    }
+    """
+
+    max_retries = 30
+    retry_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(
+                f"{settings.sonataflow_graphql_url}/graphql",
+                data=json.dumps({
+                    "query": query,
+                    "variables": {"id": workflow_instance_id}
+                }).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+
+            with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
+                response_data = json.loads(r.read().decode())
+                instances = response_data.get("data", {}).get("ProcessInstances", [])
+
+                if not instances:
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            "Workflow instance %s not found in Data Index (attempt %d/%d), retrying in %ds...",
+                            workflow_instance_id, attempt + 1, max_retries, retry_delay
+                        )
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        raise HTTPException(
+                            status_code=404,
+                            detail=f"Workflow instance {workflow_instance_id} not found after {max_retries} attempts"
+                        )
+
+                variables = instances[0].get("variables", {})
+                workflow_data = variables.get("workflowdata", {})
+
+                logger.info("Workflow instance %s has deploymentMode: %s (found on attempt %d)",
+                           workflow_instance_id, workflow_data.get("deploymentMode"), attempt + 1)
+                return workflow_data
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(
+                    "Failed to query Data Index for workflow %s (attempt %d/%d): %s, retrying...",
+                    workflow_instance_id, attempt + 1, max_retries, e
+                )
+                time.sleep(retry_delay)
+                continue
+            else:
+                logger.error("Failed to query Data Index for workflow %s after %d attempts: %s",
+                           workflow_instance_id, max_retries, e)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to query workflow metadata: {e}"
+                )
+
+
 @router.post("/epic", response_model=CreateEpicResponse, status_code=201)
 def create_epic(
     body: CreateEpicRequest,
     _caller: str = Depends(_require_auth),
     settings: Settings = Depends(get_settings),
-    x_workflow_type: str = Header(alias="X-Workflow-Type"),
 ):
     """Create Jira epic with rich description and optional ProForma form.
     Called by SonataFlow during the CreateEpic state with all template fields."""
     if not settings.jira_url:
         raise HTTPException(status_code=503, detail="Jira not configured")
 
-    # Normalize workflow type (accept both - and _)
-    workflow_type = x_workflow_type.replace("_", "-")
+    # Query SonataFlow runtime API by business key (instant - no Data Index wait)
+    workflow_data = _get_workflow_data_by_business_key(body.businessKey, body.deploymentMode, settings)
+    workflow_type = body.deploymentMode  # Already in correct format (rhdp-published)
 
     # Format epic summary and description based on type
     if workflow_type in ("rhdp-published", "onboarded"):
-        summary, description_adf = _format_onboarded_epic(body.fields)
+        summary, description_adf = _format_onboarded_epic(workflow_data)
         labels = ["publishing-house", "ph-onboarded"]
     elif workflow_type == "field-source":
-        summary, description_adf = _format_field_source_epic(body.fields)
+        summary, description_adf = _format_field_source_epic(workflow_data)
         labels = ["publishing-house", "ph-field-source"]
     else:
         raise HTTPException(status_code=400, detail=f"Unknown workflow type: {workflow_type}")
 
     # Add content type label
-    if body.fields.get("contentType"):
-        labels.append(body.fields["contentType"])
+    if workflow_data.get("contentType"):
+        labels.append(workflow_data["contentType"])
 
     # Lookup assignee
     assignee = None
@@ -647,7 +758,7 @@ def create_epic(
     except Exception as e:
         logger.warning("jira: Testing task creation failed for epic %s: %s", epic_key, e)
 
-    if body.fields.get("showroomType") != "zero_touch":
+    if workflow_data.get("showroomType") != "zero_touch":
         dev_ci_fields = {
             "project": {"key": settings.jira_project_key},
             "summary": "[PH] Development CI",
@@ -688,13 +799,12 @@ def create_epic(
     # ProForma form creation removed - all fields stored in epic description
     # Description format is driven by epic_type (onboarded vs field_source)
     jira_url = f"{settings.jira_url}/browse/{epic_key}"
-    project_id = body.fields.get("projectId", "unknown")
+    project_id = workflow_data.get("projectId", "unknown")
     logger.info("jira: created epic %s for project %s", epic_key, project_id)
 
     return CreateEpicResponse(
         epic_key=epic_key,
-        jira_url=jira_url,
-        proforma_form_id=""
+        jira_url=jira_url
     )
 
 
@@ -704,24 +814,21 @@ def update_epic(
     body: UpdateEpicRequest,
     _caller: str = Depends(_require_auth),
     settings: Settings = Depends(get_settings),
-    x_workflow_type: str = Header(alias="X-Workflow-Type"),
 ):
     """Update Jira epic description after pre-intake approval.
     Reads ProForma form if available, otherwise uses workflow fields."""
     if not settings.jira_url:
         raise HTTPException(status_code=503, detail="Jira not configured")
 
-    # Normalize workflow type (accept both - and _)
-    workflow_type = x_workflow_type.replace("_", "-")
+    # Query SonataFlow runtime API by business key (instant - no Data Index wait)
+    workflow_data = _get_workflow_data_by_business_key(body.businessKey, body.deploymentMode, settings)
+    workflow_type = body.deploymentMode  # Already in correct format (rhdp-published)
 
-    # Use workflow fields (ProForma removed - fields stored in description only)
-    final_fields = body.fields
-
-    # Rebuild epic description with final values
+    # Rebuild epic description with final values from workflow data
     if workflow_type in ("rhdp-published", "onboarded"):
-        summary, description_adf = _format_onboarded_epic(final_fields)
+        summary, description_adf = _format_onboarded_epic(workflow_data)
     elif workflow_type == "field-source":
-        summary, description_adf = _format_field_source_epic(final_fields)
+        summary, description_adf = _format_field_source_epic(workflow_data)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown workflow type: {workflow_type}")
 
@@ -824,9 +931,8 @@ def notify_reviewers_bg(epic_key: str, group_name: str, settings: Settings) -> N
 
 
 class SyncRequest(BaseModel):
-    repo_url: str
-    epic_key: str
-    slug: str = ""
+    businessKey: str
+    deploymentMode: str
     status: str = ""
 
 
@@ -1156,11 +1262,28 @@ async def sync_jira_tasks(
     if not settings.github_token:
         raise HTTPException(status_code=503, detail="GitHub token not configured")
 
+    # Import here to avoid circular dependency
+    from .projects import _get_workflow_from_runtime
+
+    # Query Runtime API for workflow data
+    workflow_instance = _get_workflow_from_runtime(body.businessKey, body.deploymentMode)
+    # Runtime API returns workflowdata directly, not under variables
+    wd = workflow_instance.get("workflowdata", {})
+
+    repo_url = wd.get("repoUrl", "")
+    epic_key = wd.get("epic_key", "")
+    slug = wd.get("projectId", body.businessKey)
+
+    if not repo_url:
+        raise HTTPException(status_code=422, detail="Workflow has no repoUrl")
+    if not epic_key:
+        raise HTTPException(status_code=422, detail="Workflow has no epic_key")
+
     asyncio.get_event_loop().run_in_executor(
-        None, _sync_jira_tasks_bg, body.repo_url, body.epic_key, settings, body.status, body.slug,
+        None, _sync_jira_tasks_bg, repo_url, epic_key, settings, body.status, slug,
     )
-    logger.info("jira sync: accepted for epic %s (status=%s) — running in background", body.epic_key, body.status)
-    return SyncResponse(epic_key=body.epic_key)
+    logger.info("jira sync: accepted for epic %s (status=%s) — running in background", epic_key, body.status)
+    return SyncResponse(epic_key=epic_key)
 
 
 def _sync_jira_tasks_bg(repo_url: str, epic_key: str, settings: Settings, status: str = "", slug: str = ""):

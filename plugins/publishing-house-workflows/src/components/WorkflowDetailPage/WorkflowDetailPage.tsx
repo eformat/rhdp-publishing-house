@@ -182,7 +182,7 @@ export function WorkflowDetailPage() {
     const baselineSha = wd?.baselineSha;
     if (!repoUrl) return;
 
-    const slug = result.summary.projectId;
+    const slug = result.summary.id; // Use workflow_id for all API calls
     const isReview = REVIEW_STAGES.includes(stage);
 
     setValidationLoading(true);
@@ -315,7 +315,7 @@ export function WorkflowDetailPage() {
       const user = result.summary.ssoEmail || result.summary.owner;
       const commitSha = validationReport?.commit_sha;
       const notes = approvalNotes.length > 0 ? approvalNotes.map(n => n.text).filter(t => t.trim()) : undefined;
-      await client.sendApprovalEvent(result.summary.id, stage, result.summary.projectId, { user, commitSha, notes });
+      await client.sendApprovalEvent(result.summary.id, stage, result.summary.id, { user, commitSha, notes });
       setApprovalNotes([]);
       setApprovalNotesDialogOpen(false);
       setSnackbar({
@@ -327,7 +327,7 @@ export function WorkflowDetailPage() {
       const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
-        const updated = await client.getWorkflow(result.summary.projectId);
+        const updated = await client.getWorkflowById(result.summary.id);
         if (updated && expectedStages.includes(updated.summary.stage)) break;
         if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
       }
@@ -355,9 +355,9 @@ export function WorkflowDetailPage() {
       if (rejectingStage === 'pre_intake_review') {
         // For pre-intake, send reasons as notes (not in rejection filter)
         const notes = data.reasons.map(r => r.text).join('\n\n');
-        await client.sendPreIntakeAction(result.summary.projectId, 'rejected', notes);
+        await client.sendPreIntakeAction(result.summary.id, 'rejected', notes);
       } else {
-        await client.sendRejectionEvent(result.summary.id, rejectingStage, data, result.summary.projectId, validationReport?.commit_sha);
+        await client.sendRejectionEvent(result.summary.id, rejectingStage, data, result.summary.id, validationReport?.commit_sha);
       }
       setRejectionDialogOpen(false);
       setSnackbar({
@@ -369,7 +369,7 @@ export function WorkflowDetailPage() {
       const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
-        const updated = await client.getWorkflow(result.summary.projectId);
+        const updated = await client.getWorkflowById(result.summary.id);
         if (updated && expectedStages.includes(updated.summary.stage)) break;
         if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
       }
@@ -400,7 +400,7 @@ export function WorkflowDetailPage() {
     try {
       if (action === 'cancelled') {
         // Delete project and all artifacts
-        await client.deleteProject(result.summary.projectId, true);
+        await client.deleteProject(result.summary.id, true);
         setSnackbar({
           open: true,
           severity: 'success',
@@ -409,7 +409,7 @@ export function WorkflowDetailPage() {
         // Navigate back to workflows list after deletion
         setTimeout(() => navigate('/publishing-house-workflows'), 2000);
       } else {
-        await client.sendPreIntakeAction(result.summary.projectId, action, notes);
+        await client.sendPreIntakeAction(result.summary.id, action, notes);
         setSnackbar({
           open: true,
           severity: 'success',
@@ -419,7 +419,7 @@ export function WorkflowDetailPage() {
         const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
         for (let i = 0; i < 12; i++) {
           await new Promise(resolve => setTimeout(resolve, 5000));
-          const updated = await client.getWorkflow(result.summary.projectId);
+          const updated = await client.getWorkflowById(result.summary.id);
           if (updated && expectedStages.includes(updated.summary.stage)) break;
           if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
         }
@@ -440,7 +440,7 @@ export function WorkflowDetailPage() {
     if (!result) return;
     setSubmittingPreIntakeUpdate(true);
     try {
-      await client.submitPreIntakeUpdate(result.summary.projectId, preIntakeFields);
+      await client.submitPreIntakeUpdate(result.summary.id, preIntakeFields);
       setSnackbar({
         open: true,
         severity: 'success',
@@ -450,7 +450,7 @@ export function WorkflowDetailPage() {
       const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
-        const updated = await client.getWorkflow(result.summary.projectId);
+        const updated = await client.getWorkflowById(result.summary.id);
         if (updated && expectedStages.includes(updated.summary.stage)) break;
         if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
       }
@@ -470,7 +470,7 @@ export function WorkflowDetailPage() {
     if (!result) return;
     setSendingMessage(true);
     try {
-      await client.sendMessage(result.summary.projectId, text, result.summary.stage);
+      await client.sendMessage(result.summary.id, text, result.summary.stage);
       setMessageDialogOpen(false);
       setSnackbar({ open: true, severity: 'success', message: 'Message sent to author.' });
     } catch (err: any) {
@@ -486,13 +486,13 @@ export function WorkflowDetailPage() {
     if (!result || !filteredAgv.length || !filteredCi.length) return;
     setSubmittingStaging(true);
     try {
-      await client.submitEnvSetup(result.summary.projectId, filteredAgv, filteredCi);
+      await client.submitEnvSetup(result.summary.id, filteredAgv, filteredCi);
       setSnackbar({ open: true, severity: 'success', message: 'Env setup info submitted — waiting for workflow to advance...' });
       const currentStage = result.summary.stage;
       const expectedStages = EXPECTED_NEXT_STAGES[currentStage] || [];
       for (let i = 0; i < 12; i++) {
         await new Promise(resolve => setTimeout(resolve, 5000));
-        const updated = await client.getWorkflow(result.summary.projectId);
+        const updated = await client.getWorkflowById(result.summary.id);
         if (updated && expectedStages.includes(updated.summary.stage)) break;
         if (updated && updated.summary.stage !== currentStage) break; // Fallback: any stage change
       }
@@ -505,10 +505,10 @@ export function WorkflowDetailPage() {
   };
 
   const handlePostTestingNote = async () => {
-    if (!result?.summary.projectId || !testingNoteText.trim()) return;
+    if (!result?.summary.id || !testingNoteText.trim()) return;
     setSubmittingTestingNote(true);
     try {
-      await client.addNote(result.summary.projectId, testingNoteText.trim());
+      await client.addNote(result.summary.id, testingNoteText.trim());
       setTestingNoteText('');
       setSnackbar({ open: true, severity: 'success', message: 'Note added.' });
       setRefreshKey(k => k + 1);
@@ -523,7 +523,7 @@ export function WorkflowDetailPage() {
     if (!result?.summary.repoUrl) return;
     setCompletingTesting(true);
     try {
-      await client.submitTesting(result.summary.projectId, result.summary.repoUrl);
+      await client.submitTesting(result.summary.id, result.summary.repoUrl);
       setSnackbar({ open: true, severity: 'success', message: 'Testing complete. Workflow advanced.' });
       setTimeout(() => window.location.reload(), 1500);
     } catch (err: any) {
@@ -695,7 +695,7 @@ export function WorkflowDetailPage() {
             )}
 
             {/* RHDP Published Content */}
-            {wd?.deploymentMode === 'rhdp_published' && (
+            {wd?.deploymentMode === 'rhdp-published' && (
               <InfoCard title={summary.stage === 'pre_intake' ? 'Update Pre-Intake Request' : 'Pre-Intake Request'}>
                 {summary.stage === 'pre_intake' && (
                   <Typography variant="body2" color="textSecondary" style={{ marginBottom: 16 }}>
@@ -998,7 +998,7 @@ export function WorkflowDetailPage() {
                     initialTags={summary.tags}
                     canEdit={isContentDeveloper || isContentReviewer || isAdmin}
                     onSave={async (tags) => {
-                      await client.updateTags(summary.projectId, tags);
+                      await client.updateTags(summary.id, tags);
                       setRefreshKey(k => k + 1);
                     }}
                   />
@@ -1008,7 +1008,7 @@ export function WorkflowDetailPage() {
             )}
 
             {/* Field Source Content - Placeholder */}
-            {wd?.deploymentMode === 'field_source' && (
+            {wd?.deploymentMode === 'field-source' && (
               <InfoCard title={summary.stage === 'pre_intake' ? 'Update Field Source Request' : 'Field Source Request'}>
                 <Grid container spacing={2}>
                   <Grid item xs={12} md={6}>
@@ -1069,7 +1069,7 @@ export function WorkflowDetailPage() {
                       initialTags={summary.tags}
                       canEdit={isContentDeveloper || isContentReviewer || isAdmin}
                       onSave={async (tags) => {
-                        await client.updateTags(summary.projectId, tags);
+                        await client.updateTags(summary.id, tags);
                         setRefreshKey(k => k + 1);
                       }}
                     />
@@ -1832,7 +1832,7 @@ export function WorkflowDetailPage() {
                     if (!addNoteText.trim()) return;
                     setSubmittingNote(true);
                     try {
-                      await client.addNote(result.summary.projectId, addNoteText.trim());
+                      await client.addNote(result.summary.id, addNoteText.trim());
                       setAddNoteText('');
                       setSnackbar({ open: true, severity: 'success', message: 'Note added successfully' });
                       setRefreshKey(k => k + 1);

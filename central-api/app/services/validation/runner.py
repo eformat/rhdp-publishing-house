@@ -110,7 +110,7 @@ async def run_validation(
             all_results.extend(approval_checklist.run_checks(spec_data, policy))
 
         if "D" in groups:
-            all_results.extend(design_structure.run_checks(design_text, policy))
+            all_results.extend(design_structure.run_checks(design_text, policy, spec_data))
 
         if "E" in groups:
             all_results.extend(module_outlines.run_checks(spec_data, outline_files, policy))

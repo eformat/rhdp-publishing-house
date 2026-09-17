@@ -45,7 +45,7 @@ spec:
         - name: KIE_FLYWAY_ENABLED
           value: "true"
         - name: QUARKUS_DATASOURCE_JDBC_URL
-          value: jdbc:postgresql://sonataflow-postgresql.{{ app_namespace }}.svc.cluster.local:5432/{{ sonataflow_db_name }}?currentSchema=publishing-house-workflow
+          value: jdbc:postgresql://sonataflow-postgresql.{{ app_namespace }}.svc.cluster.local:5432/{{ sonataflow_db_name }}?currentSchema=rhdp-published
         - name: QUARKUS_DATASOURCE_USERNAME
           valueFrom:
             secretKeyRef:
@@ -66,7 +66,12 @@ spec:
         volumeMounts:
         - name: managed-props
           mountPath: /deployments/config
+        - name: central-api-spec
+          mountPath: /deployments/resources/specs
       volumes:
       - name: managed-props
         configMap:
           name: rhdp-published-managed-props
+      - name: central-api-spec
+        configMap:
+          name: central-api-spec

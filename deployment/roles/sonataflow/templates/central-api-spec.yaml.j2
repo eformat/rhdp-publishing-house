@@ -4,20 +4,12 @@ info:
   version: 1.0.0
   description: OpenAPI spec consumed by SonataFlow for workflow REST calls
 servers:
-  - url: https://central-api-{{ app_namespace }}.{{ ocp_apps_domain }}/api/v1
+  - url: http://central-api.{{ app_namespace }}:8000/api/v1
 paths:
   /jira/epic:
     post:
       operationId: createJiraEpic
       summary: Create a Jira epic with rich description and optional ProForma form
-      parameters:
-        - name: X-Workflow-Type
-          in: header
-          required: true
-          schema:
-            type: string
-            enum: [rhdp-published, rhdp_published, field-source, field_source]
-          description: Workflow type (required header)
       requestBody:
         required: true
         content:
@@ -25,11 +17,15 @@ paths:
             schema:
               type: object
               required:
-                - fields
+                - businessKey
+                - deploymentMode
               properties:
-                fields:
-                  type: object
-                  description: All template fields as key-value pairs
+                businessKey:
+                  type: string
+                  description: Project ID used as workflow business key
+                deploymentMode:
+                  type: string
+                  description: Workflow type (rhdp-published, field-source, etc.)
       responses:
         '200':
           description: Epic created successfully
@@ -50,14 +46,6 @@ paths:
     post:
       operationId: updateJiraEpic
       summary: Update Jira epic description after pre-intake approval
-      parameters:
-        - name: X-Workflow-Type
-          in: header
-          required: true
-          schema:
-            type: string
-            enum: [rhdp-published, rhdp_published, field-source, field_source]
-          description: Workflow type (required header)
       requestBody:
         required: true
         content:
@@ -66,14 +54,17 @@ paths:
               type: object
               required:
                 - epic_key
+                - businessKey
+                - deploymentMode
               properties:
                 epic_key:
                   type: string
-                proforma_form_id:
+                businessKey:
                   type: string
-                fields:
-                  type: object
-                  description: Fallback field values if ProForma not used
+                  description: Project ID used as workflow business key
+                deploymentMode:
+                  type: string
+                  description: Workflow type (rhdp-published, field-source, etc.)
       responses:
         '200':
           description: Epic updated successfully
@@ -98,13 +89,19 @@ paths:
           required: true
           schema:
             type: string
+          description: Project ID (businessKey)
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - deploymentMode
               properties:
+                deploymentMode:
+                  type: string
+                  description: Workflow type (rhdp-published, field-source, etc.)
                 repo_owner:
                   type: string
                   default: "rhpds"
@@ -144,17 +141,18 @@ paths:
             schema:
               type: object
               required:
-                - repo_url
-                - epic_key
+                - businessKey
+                - deploymentMode
               properties:
-                repo_url:
+                businessKey:
                   type: string
-                epic_key:
+                  description: Project ID used as workflow business key
+                deploymentMode:
                   type: string
-                slug:
-                  type: string
+                  description: Workflow type (rhdp-published, field-source, etc.)
                 status:
                   type: string
+                  description: Stage completion status (IntakeComplete, EnvSetupComplete, etc.)
       responses:
         '200':
           description: Jira sync completed

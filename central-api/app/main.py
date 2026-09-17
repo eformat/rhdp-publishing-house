@@ -21,7 +21,7 @@ from .auth.groups import decode_signed_key
 from .auth.token_cache import load_backup, save_backup
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
