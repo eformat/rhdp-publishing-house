@@ -1,0 +1,38 @@
+# REVERT POINT: Before Multi-Workflow Implementation
+
+**Date:** 2026-09-17
+**Commit:** b031a1ec23765acce0029c17293d869991050f71
+**Message:** fix: add pre_intake next stage expectation
+
+## To Revert
+
+If the multi-workflow implementation needs to be rolled back:
+
+```bash
+git reset --hard b031a1ec23765acce0029c17293d869991050f71
+```
+
+Or to create a revert commit:
+
+```bash
+git revert --no-commit HEAD..b031a1ec23765acce0029c17293d869991050f71
+git commit -m "Revert: multi-workflow implementation"
+```
+
+## What Will Be Changed
+
+1. Central API: Add workflow type routing infrastructure
+2. Workflow naming: Rename to "rhdp-published"
+3. Add X-Workflow-Type header requirement
+4. Update GraphQL queries for processId filtering
+5. Deploy nginx proxy for workflow routing
+
+## Branch Info
+
+- Current branch: main
+- Clean working tree: Yes
+- Uncommitted changes: None
+
+---
+
+**Keep this file until multi-workflow implementation is stable and tested in production.**
