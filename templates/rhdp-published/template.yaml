@@ -1,12 +1,13 @@
 apiVersion: scaffolder.backstage.io/v1beta3
 kind: Template
 metadata:
-  name: publishing-house-project
-  title: Publishing House Content Project
-  description: Create a new PH content project with orchestrated workflow
+  name: rhdp-published
+  title: RHDP Published Content
+  description: Create RHDP published lab or demo with full onboarding workflow
   tags:
-    - publishing-house
+    - rhdp-published
     - lab
+    - demo
     - devspaces
 
 spec:

@@ -2,14 +2,14 @@ apiVersion: sonataflow.org/v1alpha08
 kind: SonataFlow
 metadata:
   annotations:
-    sonataflow.org/description: Publishing House content lifecycle with pre-intake review
+    sonataflow.org/description: RHDP Published content lifecycle with pre-intake review
     sonataflow.org/profile: preview
     sonataflow.org/version: "2.0"
   labels:
     app: publishing-house
     component: workflow
-    sonataflow.org/workflow-app: publishing-house-workflow
-  name: publishinghouseworkflow
+    sonataflow.org/workflow-app: rhdp-published
+  name: rhdp-published
   namespace: "{{ app_namespace }}"
 spec:
   flow:

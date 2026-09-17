@@ -6,5 +6,5 @@ metadata:
 spec:
   type: url
   targets:
-    - ./publishing-house-project/template.yaml
+    - ./rhdp-published/template.yaml
     - ./publishing-house-migration/template.yaml

@@ -244,7 +244,7 @@ def _patch_workflow_data(wf_uuid: str, data: dict, settings=None) -> None:
         settings = get_settings()
     try:
         req = urllib.request.Request(
-            f"{settings.sonataflow_url.rstrip('/')}/publishinghouseworkflow/{wf_uuid}",
+            f"{settings.sonataflow_url.rstrip('/')}/rhdp-published/{wf_uuid}",
             data=json.dumps({"workflowdata": data}).encode(),
             headers={"Content-Type": "application/json"},
             method="PATCH",
@@ -542,7 +542,7 @@ async def start_workflow(
     }
 
     # Start SonataFlow workflow instance with businessKey
-    workflow_url = f"{settings.sonataflow_url.rstrip('/')}/publishinghouseworkflow?businessKey={project_name}"
+    workflow_url = f"{settings.sonataflow_url.rstrip('/')}/rhdp-published?businessKey={project_name}"
     headers = {"Content-Type": "application/json"}
 
     req = urllib.request.Request(
@@ -1948,7 +1948,7 @@ async def start_workflow(
     wd["intakeType"] = body.intake_type
     start_payload = wd
 
-    url = f"{settings.sonataflow_url.rstrip('/')}/publishinghouseworkflow?businessKey={urllib.parse.quote(business_key)}"
+    url = f"{settings.sonataflow_url.rstrip('/')}/rhdp-published?businessKey={urllib.parse.quote(business_key)}"
 
     async def _fire_sonataflow():
         try:
@@ -2084,7 +2084,7 @@ async def delete_project(
     for wf_id in active_ids:
         try:
             req = urllib.request.Request(
-                f"{settings.sonataflow_url.rstrip('/')}/management/processes/publishinghouseworkflow/instances/{wf_id}",
+                f"{settings.sonataflow_url.rstrip('/')}/management/processes/rhdp-published/instances/{wf_id}",
                 method="DELETE",
             )
             with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10):

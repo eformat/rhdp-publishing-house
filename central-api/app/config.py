@@ -20,10 +20,10 @@ class Settings(BaseSettings):
 
     # SonataFlow Configuration
     # Runtime pod — receives CloudEvents
-    sonataflow_url: str = "http://publishinghouseworkflow.publishing-house:80"
+    sonataflow_url: str = "http://rhdp-published.publishing-house:80"
     # GraphQL endpoint for workflow state queries
     # dev mode: runtime pod has embedded /graphql
-    # sonataflow_graphql_url: str = "http://publishinghouseworkflow.publishing-house:80"
+    # sonataflow_graphql_url: str = "http://rhdp-published.publishing-house:80"
     # preview mode: use platform data-index service instead
     sonataflow_graphql_url: str = "http://sonataflow-platform-data-index-service.publishing-house:80"
 
