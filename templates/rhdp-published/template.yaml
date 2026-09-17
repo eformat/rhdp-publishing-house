@@ -68,7 +68,7 @@ spec:
         associated_opportunities:
           title: Associated Opportunities
           type: string
-          description: Is this associated with any specific opportunities, projects, or marketing campaigns? N/A is acceptable.
+          description: Is this associated with any specific sales opportunities, services projects, or marketing campaigns? If so, include the Sales Cloud ID here as well as a description including things like customer name, opportunity dollar amount, etc. Requests with higher value opportunities or revenue will receive higher priority if approved for onboarding to RHDP.
           ui:widget: textarea
           ui:options:
             rows: 3
@@ -101,25 +101,36 @@ spec:
             - properties:
                 ai_related:
                   const: true
-                gpu_needed:
-                  title: Do you need direct GPU access?
+                can_use_maas:
+                  title: Can you use MaaS?
                   type: boolean
-                  default: false
-                  ui:help: Check if GPU hardware is required
+                  default: true
+                  ui:help: Model-as-a-Service provides API access to AI models without requiring direct GPU hardware
               dependencies:
-                gpu_needed:
+                can_use_maas:
                   oneOf:
                     - properties:
-                        gpu_needed:
-                          const: false
-                    - properties:
-                        gpu_needed:
+                        can_use_maas:
                           const: true
-                        maas_instead:
-                          title: Can you use MaaS instead?
-                          type: boolean
-                          default: false
-                          ui:help: Check if Model-as-a-Service can substitute for GPU
+                        maas_models:
+                          title: Which model(s) do you need?
+                          type: string
+                          ui:widget: textarea
+                          ui:options:
+                            rows: 2
+                          ui:help: List the model(s) you need. See available models at https://maas-rhdp.apps.maas.redhatworkshops.io/models
+                          ui:placeholder: "e.g., gpt-4o, claude-3-5-sonnet"
+                    - properties:
+                        can_use_maas:
+                          const: false
+                        gpu_justification:
+                          title: GPU Justification
+                          type: string
+                          ui:widget: textarea
+                          ui:options:
+                            rows: 4
+                          ui:help: Onboarding requests that require direct GPU access will require strong justification. Explain why you need direct GPU access and what size GPU you require.
+                          ui:placeholder: "Explain why MaaS cannot meet your needs and specify GPU requirements (e.g., A100 80GB for fine-tuning large language models)"
 
     - title: Project Setup
       required:
@@ -294,8 +305,9 @@ spec:
           associatedOpportunities: ${{ parameters.associated_opportunities }}
           salesPlayTdp: ${{ parameters.sales_play_tdp }}
           aiRelated: ${{ parameters.ai_related }}
-          gpuNeeded: ${{ parameters.gpu_needed }}
-          maasInstead: ${{ parameters.maas_instead }}
+          canUseMaas: ${{ parameters.can_use_maas }}
+          maasModels: ${{ parameters.maas_models }}
+          gpuJustification: ${{ parameters.gpu_justification }}
           partnersAccess: ${{ parameters.partners_access }}
           cloudProvider: ${{ parameters.cloud_provider }}
           clusterType: ${{ parameters.cluster_type }}
@@ -309,54 +321,17 @@ spec:
           phGitRef: ${{ environment.parameters.phGitRef }}
 
   output:
-    links:
-      - title: View Workflow Status
-        icon: dashboard
-        url: /publishing-house/projects/ph-${{ parameters.project_name }}
-        if: ${{ steps['check-catalog'].output.entity == null }}
-
-      - title: View Jira Epic
-        icon: docs
-        url: ${{ steps['trigger-workflow'].output.body.jira_url }}
-        if: ${{ steps['check-catalog'].output.entity == null && steps['trigger-workflow'].output.body.jira_url }}
-
-      - title: View Existing Entity in Catalog
-        icon: catalog
-        url: /catalog/default/component/ph-${{ parameters.project_name }}
-        if: ${{ steps['check-catalog'].output.entity != null }}
-
     text:
       - title: Result
         content: |
           {% if steps['check-catalog'].output.entity %}
-          **Scaffolding Skipped**
+          **Error: Project Already Exists**
 
-          A project named **"ph-${{ parameters.project_name }}"** already exists in the catalog. All steps were skipped — no repository was created and no workflow was started. Re-run the template with a different project name.
+          A project named **"ph-${{ parameters.project_name }}"** already exists in the catalog. Please re-run the template with a different project name.
           {% else %}
-          **Your Publishing House project is live!** You're ready to start building.
+          **Thank you for your submission!**
 
-          **Here's what we set up for you:**
-          1. Repository created
-          2. catalog-info.yaml added to repository
-          3. Registered in Developer Hub catalog
-          4. Orchestrator workflow started — your AI-guided content pipeline is running!
+          Your onboarding request for **"${{ parameters.asset_title }}"** has been received and is under review.
 
-          **What happens next:**
-          Claude will walk you through the entire content lifecycle — from intake and spec creation, through Jira tracking and reviews, all the way to a published lab on RHDP. Just follow the prompts!
-
-          **Getting Started:**
-
-          **DevSpaces (recommended):**
-          1. Click the **Open in DevSpaces** link above
-          2. Use Claude via the **extension** or the **CLI**:
-             - **Extension:** Click the **Claude** icon in the sidebar, click **New Session**. If the Claude icon is not visible, open **Extensions** (`Ctrl/Cmd+Shift+X`), find **Claude Code for VS Code** under the DevSpaces section, click it, then click **Enable (Workspace)**.
-             - **CLI:** Open a terminal and run `claude`
-          3. Run `/rhdp-publishing-house` — and you're off!
-
-          **Local machine:**
-          1. Install the skills: `git clone -b ${{ environment.parameters.phGitRef }} https://github.com/rhpds/rhdp-publishing-house-skills.git ~/.claude/skills/publishing-house`
-          2. Clone the repo: `git clone https://github.com/rhpds/ph-${{ parameters.project_name }}`
-          3. `cd ph-${{ parameters.project_name }}`
-          4. Start Claude CLI: `claude`
-          5. Run `/rhdp-publishing-house` — and you're off!
+          We'll be in touch soon about next steps.
           {% endif %}

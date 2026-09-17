@@ -243,8 +243,9 @@ export function WorkflowDetailPage() {
         associatedOpportunities: wd.associatedOpportunities || '',
         salesPlayTdp: wd.salesPlayTdp || '',
         aiRelated: wd.aiRelated || false,
-        gpuNeeded: wd.gpuNeeded || false,
-        maasInstead: wd.maasInstead || false,
+        canUseMaas: wd.canUseMaas !== undefined ? wd.canUseMaas : true,
+        maasModels: wd.maasModels || '',
+        gpuJustification: wd.gpuJustification || '',
         partnersAccess: wd.partnersAccess || false,
         cloudProvider: wd.cloudProvider || 'cnv',
         clusterType: wd.clusterType || 'sno',
@@ -891,8 +892,9 @@ export function WorkflowDetailPage() {
                               onChange={(e) => setPreIntakeFields({
                                 ...preIntakeFields,
                                 aiRelated: e.target.checked,
-                                gpuNeeded: e.target.checked ? preIntakeFields.gpuNeeded : false,
-                                maasInstead: e.target.checked ? preIntakeFields.maasInstead : false
+                                canUseMaas: e.target.checked ? (preIntakeFields.canUseMaas !== undefined ? preIntakeFields.canUseMaas : true) : true,
+                                maasModels: e.target.checked ? preIntakeFields.maasModels : '',
+                                gpuJustification: e.target.checked ? preIntakeFields.gpuJustification : ''
                               })}
                             />
                           }
@@ -909,34 +911,53 @@ export function WorkflowDetailPage() {
                             <FormControlLabel
                               control={
                                 <Checkbox
-                                  checked={preIntakeFields.gpuNeeded ?? wd?.gpuNeeded ?? false}
+                                  checked={preIntakeFields.canUseMaas !== undefined ? preIntakeFields.canUseMaas : (wd?.canUseMaas !== undefined ? wd.canUseMaas : true)}
                                   onChange={(e) => setPreIntakeFields({
                                     ...preIntakeFields,
-                                    gpuNeeded: e.target.checked,
-                                    maasInstead: e.target.checked ? preIntakeFields.maasInstead : false
+                                    canUseMaas: e.target.checked,
+                                    maasModels: e.target.checked ? preIntakeFields.maasModels : '',
+                                    gpuJustification: !e.target.checked ? preIntakeFields.gpuJustification : ''
                                   })}
                                 />
                               }
-                              label="GPU Needed"
+                              label="Can Use MaaS"
                             />
                           ) : (
-                            wd?.gpuNeeded && <DetailField label="GPU Needed" value="Yes" />
+                            (wd?.canUseMaas !== undefined ? wd.canUseMaas : true) && <DetailField label="Can Use MaaS" value="Yes" />
                           )}
                         </Grid>
-                        {(preIntakeFields.gpuNeeded ?? wd?.gpuNeeded) && (
-                          <Grid item xs={12} md={3}>
+                        {(preIntakeFields.canUseMaas !== undefined ? preIntakeFields.canUseMaas : (wd?.canUseMaas !== undefined ? wd.canUseMaas : true)) ? (
+                          <Grid item xs={12} md={6}>
                             {summary.stage === 'pre_intake' ? (
-                              <FormControlLabel
-                                control={
-                                  <Checkbox
-                                    checked={preIntakeFields.maasInstead ?? wd?.maasInstead ?? false}
-                                    onChange={(e) => setPreIntakeFields({ ...preIntakeFields, maasInstead: e.target.checked })}
-                                  />
-                                }
-                                label="Use MaaS Instead"
+                              <TextField
+                                fullWidth
+                                label="MaaS Models Needed"
+                                placeholder="e.g., gpt-4o, claude-3-5-sonnet"
+                                value={preIntakeFields.maasModels ?? wd?.maasModels ?? ''}
+                                onChange={(e) => setPreIntakeFields({ ...preIntakeFields, maasModels: e.target.value })}
+                                size="small"
+                                multiline
+                                rows={2}
                               />
                             ) : (
-                              wd?.maasInstead && <DetailField label="Use MaaS" value="Yes" />
+                              wd?.maasModels && <DetailField label="MaaS Models" value={wd.maasModels} />
+                            )}
+                          </Grid>
+                        ) : (
+                          <Grid item xs={12} md={6}>
+                            {summary.stage === 'pre_intake' ? (
+                              <TextField
+                                fullWidth
+                                label="GPU Justification"
+                                placeholder="Explain why MaaS cannot meet your needs and specify GPU requirements"
+                                value={preIntakeFields.gpuJustification ?? wd?.gpuJustification ?? ''}
+                                onChange={(e) => setPreIntakeFields({ ...preIntakeFields, gpuJustification: e.target.value })}
+                                size="small"
+                                multiline
+                                rows={2}
+                              />
+                            ) : (
+                              wd?.gpuJustification && <DetailField label="GPU Justification" value={wd.gpuJustification} />
                             )}
                           </Grid>
                         )}

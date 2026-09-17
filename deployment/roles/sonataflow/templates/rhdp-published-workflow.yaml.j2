@@ -123,6 +123,9 @@ spec:
       - name: updatejiraepic
         operation: specs/central-api.yaml#updateJiraEpic
         type: rest
+      - name: createinitialtasks
+        operation: specs/central-api.yaml#createInitialTasks
+        type: rest
       - name: createcatalog
         operation: specs/central-api.yaml#createCatalog
         type: rest
@@ -157,8 +160,9 @@ spec:
               associatedOpportunities: (.associatedOpportunities // ""),
               salesPlayTdp: (.salesPlayTdp // ""),
               aiRelated: (.aiRelated // false),
-              gpuNeeded: (.gpuNeeded // false),
-              maasInstead: (.maasInstead // false),
+              canUseMaas: (.canUseMaas // true),
+              maasModels: (.maasModels // ""),
+              gpuJustification: (.gpuJustification // ""),
               partnersAccess: (.partnersAccess // false),
               cloudProvider: (.cloudProvider // "cnv"),
               clusterType: (.clusterType // "sno"),
@@ -350,6 +354,18 @@ spec:
               catalogRegistered: (.catalogData.catalogRegistered // false),
               auditTrailSha: (.catalogData.commitSha // "")
             } | del(.catalogData)
+        transition:
+          nextState: CreateInitialTasks
+      - name: CreateInitialTasks
+        type: operation
+        actions:
+          - name: CreateJiraInitialTasks
+            condition: "${ .epic_key != \"\" }"
+            functionRef:
+              refName: createinitialtasks
+              arguments:
+                epic_key: .epic_key
+                showroomType: .showroomType
         transition:
           nextState: Intake
       - name: Rejected

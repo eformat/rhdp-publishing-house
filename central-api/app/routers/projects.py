@@ -67,8 +67,9 @@ class PreIntakeUpdateRequest(BaseModel):
     associatedOpportunities: str = None
     salesPlayTdp: str = None
     aiRelated: bool = None
-    gpuNeeded: bool = None
-    maasInstead: bool = None
+    canUseMaas: bool = None
+    maasModels: str = None
+    gpuJustification: str = None
     partnersAccess: bool = None
     cloudProvider: str = None
     clusterType: str = None
@@ -104,8 +105,9 @@ class StartWorkflowRequest(BaseModel):
     associatedOpportunities: str = ""
     salesPlayTdp: str = ""
     aiRelated: bool = False
-    gpuNeeded: bool = False
-    maasInstead: bool = False
+    canUseMaas: bool = True
+    maasModels: str = ""
+    gpuJustification: str = ""
     partnersAccess: bool = False
     cloudProvider: str = "cnv"
     clusterType: str = "sno"
@@ -580,8 +582,9 @@ async def start_workflow(
         "associatedOpportunities": body.associatedOpportunities,
         "salesPlayTdp": body.salesPlayTdp,
         "aiRelated": body.aiRelated,
-        "gpuNeeded": body.gpuNeeded,
-        "maasInstead": body.maasInstead,
+        "canUseMaas": body.canUseMaas,
+        "maasModels": body.maasModels,
+        "gpuJustification": body.gpuJustification,
         "partnersAccess": body.partnersAccess,
         "cloudProvider": body.cloudProvider,
         "clusterType": body.clusterType,

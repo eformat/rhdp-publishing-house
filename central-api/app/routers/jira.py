@@ -696,7 +696,40 @@ def create_epic(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Jira epic creation failed: {e}")
 
-    # Create an Intake child task so the board shows intake is pending
+    # ProForma form creation removed - all fields stored in epic description
+    # Description format is driven by epic_type (onboarded vs field_source)
+    jira_url = f"{settings.jira_url}/browse/{epic_key}"
+    project_id = workflow_data.get("projectId", "unknown")
+    logger.info("jira: created epic %s for project %s", epic_key, project_id)
+
+    return CreateEpicResponse(
+        epic_key=epic_key,
+        jira_url=jira_url
+    )
+
+
+class CreateInitialTasksRequest(BaseModel):
+    showroomType: str = "classic"
+
+
+@router.post("/epic/{epic_key}/create-initial-tasks")
+def create_initial_tasks(
+    epic_key: str,
+    body: CreateInitialTasksRequest,
+    _caller: str = Depends(_require_auth),
+    settings: Settings = Depends(get_settings),
+):
+    """Create Intake and Development CI tasks after pre-intake approval.
+
+    This endpoint is called after pre-intake review is approved.
+    Creates:
+    - Intake task (always)
+    - Development CI task (only if not zero_touch)
+    """
+    if not settings.jira_url:
+        raise HTTPException(status_code=503, detail="Jira not configured")
+
+    # Create Intake task
     intake_fields = {
         "project": {"key": settings.jira_project_key},
         "summary": "[PH] Intake",
@@ -727,38 +760,10 @@ def create_epic(
             logger.info("jira: created Intake task under epic %s", epic_key)
     except Exception as e:
         logger.warning("jira: Intake task creation failed for epic %s: %s", epic_key, e)
+        raise HTTPException(status_code=502, detail=f"Intake task creation failed: {e}")
 
-    testing_fields = {
-        "project": {"key": settings.jira_project_key},
-        "summary": "[PH] Testing",
-        "issuetype": {"name": "Task"},
-        "parent": {"key": epic_key},
-        "labels": ["publishing-house", "ph:testing", "rhdp_ops"],
-        "assignee": None,
-        STORY_POINTS_FIELD: float(POINTS["testing"]),
-        "description": {
-            "type": "doc",
-            "version": 1,
-            "content": [
-                {"type": "paragraph", "content": [{"type": "text",
-                 "text": "Testing phase tracker. Testers post comments here during testing. "
-                         "This task will be closed automatically when testing is marked complete."}]},
-            ],
-        },
-    }
-    try:
-        req = urllib.request.Request(
-            f"{settings.jira_url}/rest/api/3/issue",
-            data=json.dumps({"fields": testing_fields}).encode(),
-            headers=_jira_headers(settings),
-            method="POST",
-        )
-        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10):
-            logger.info("jira: created Testing task under epic %s", epic_key)
-    except Exception as e:
-        logger.warning("jira: Testing task creation failed for epic %s: %s", epic_key, e)
-
-    if workflow_data.get("showroomType") != "zero_touch":
+    # Create Development CI task only if not zero_touch
+    if body.showroomType != "zero_touch":
         dev_ci_fields = {
             "project": {"key": settings.jira_project_key},
             "summary": "[PH] Development CI",
@@ -789,24 +794,44 @@ def create_epic(
                 logger.info("jira: created Dev CI task under epic %s", epic_key)
         except Exception as e:
             logger.warning("jira: Dev CI task creation failed for epic %s: %s", epic_key, e)
+            # Don't raise here - Intake task was created successfully
+    else:
+        logger.info("jira: skipping Dev CI task for zero_touch showroom type")
 
-    for ft in FIXED_TASKS:
-        _create_task(
-            epic_key, ft["summary"], "", f"ph:{ft['id']}", settings,
-            points=POINTS.get(ft["id"]),
+    # Create Testing task (always)
+    testing_fields = {
+        "project": {"key": settings.jira_project_key},
+        "summary": "[PH] Testing",
+        "issuetype": {"name": "Task"},
+        "parent": {"key": epic_key},
+        "labels": ["publishing-house", "ph:testing", "rhdp_ops"],
+        "assignee": None,
+        STORY_POINTS_FIELD: float(POINTS["testing"]),
+        "description": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text",
+                 "text": "Testing phase tracker. Testers post comments here during testing. "
+                         "This task will be closed automatically when testing is marked complete."}]},
+            ],
+        },
+    }
+    try:
+        req = urllib.request.Request(
+            f"{settings.jira_url}/rest/api/3/issue",
+            data=json.dumps({"fields": testing_fields}).encode(),
+            headers=_jira_headers(settings),
+            method="POST",
         )
+        with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10):
+            logger.info("jira: created Testing task under epic %s", epic_key)
+    except Exception as e:
+        logger.warning("jira: Testing task creation failed for epic %s: %s", epic_key, e)
+        # Don't raise here - other tasks were created successfully
 
-    # ProForma form creation removed - all fields stored in epic description
-    # Description format is driven by epic_type (onboarded vs field_source)
-    jira_url = f"{settings.jira_url}/browse/{epic_key}"
-    project_id = workflow_data.get("projectId", "unknown")
-    logger.info("jira: created epic %s for project %s", epic_key, project_id)
-
-    return CreateEpicResponse(
-        epic_key=epic_key,
-        jira_url=jira_url
-    )
-
+    logger.info("jira: created initial tasks for epic %s", epic_key)
+    return {"status": "success", "epic_key": epic_key}
 
 
 @router.post("/epic/update", response_model=UpdateEpicResponse)
