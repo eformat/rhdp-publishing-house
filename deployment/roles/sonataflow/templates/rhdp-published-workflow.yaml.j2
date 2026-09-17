@@ -123,9 +123,6 @@ spec:
       - name: updatejiraepic
         operation: specs/central-api.yaml#updateJiraEpic
         type: rest
-      - name: createinitialtasks
-        operation: specs/central-api.yaml#createInitialTasks
-        type: rest
       - name: createcatalog
         operation: specs/central-api.yaml#createCatalog
         type: rest
@@ -354,18 +351,6 @@ spec:
               catalogRegistered: (.catalogData.catalogRegistered // false),
               auditTrailSha: (.catalogData.commitSha // "")
             } | del(.catalogData)
-        transition:
-          nextState: CreateInitialTasks
-      - name: CreateInitialTasks
-        type: operation
-        actions:
-          - name: CreateJiraInitialTasks
-            condition: "${ .epic_key != \"\" }"
-            functionRef:
-              refName: createinitialtasks
-              arguments:
-                epic_key: .epic_key
-                showroomType: .showroomType
         transition:
           nextState: Intake
       - name: Rejected

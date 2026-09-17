@@ -42,42 +42,6 @@ paths:
                     type: string
       security:
         - bearerAuth: []
-  /jira/epic/{epic_key}/create-initial-tasks:
-    post:
-      operationId: createInitialTasks
-      summary: Create Intake and Development CI tasks after pre-intake approval
-      parameters:
-        - name: epic_key
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Jira epic key (e.g., RHDPCD-123)
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                showroomType:
-                  type: string
-                  description: Showroom type (classic or zero_touch)
-                  default: classic
-      responses:
-        '200':
-          description: Initial tasks created successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                  epic_key:
-                    type: string
-      security:
-        - bearerAuth: []
   /jira/epic/update:
     post:
       operationId: updateJiraEpic
