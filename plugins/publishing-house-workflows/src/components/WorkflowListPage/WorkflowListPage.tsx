@@ -156,18 +156,21 @@ const columns: TableColumn<WorkflowSummary>[] = [
     defaultSort: 'desc' as const,
   },
   {
-    title: 'Last Updated',
-    field: 'lastUpdate',
-    render: (row: WorkflowSummary) =>
-      row.lastUpdate
-        ? new Date(row.lastUpdate).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-        : '—',
+    title: 'Workflow',
+    field: 'deploymentMode',
+    render: (row: WorkflowSummary) => {
+      const label = row.deploymentMode === 'rhdp-published' ? 'RHDP Published' :
+                    row.deploymentMode === 'field-source' ? 'Field Source' :
+                    row.deploymentMode;
+      return (
+        <Chip
+          label={label}
+          size="small"
+          variant="outlined"
+          style={{ fontWeight: 600, fontSize: '0.7rem' }}
+        />
+      );
+    },
   },
 ];
 

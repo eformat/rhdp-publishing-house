@@ -567,12 +567,12 @@ export function createPhWorkflowsClient(options: {
   }
 
   async function submitTesting(
-    slug: string,
+    workflowId: string,
     repoUrl: string,
     branch: string = 'main',
   ): Promise<{ status: number; error?: string; validation?: any }> {
     const response = await centralFetch(
-      `/projects/testing/${slug}`,
+      `/projects/${workflowId}/testing`,
       {
         method: 'POST',
         body: JSON.stringify({ repo_url: repoUrl, branch }),

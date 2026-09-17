@@ -859,9 +859,9 @@ async def submit_development(
         ).model_dump())
 
 
-@router.post("/testing/{project_slug}", response_model=TestingResponse)
+@router.post("/{workflow_id}/testing", response_model=TestingResponse)
 async def submit_testing(
-    project_slug: str,
+    workflow_id: str,
     body: TestingRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
@@ -886,7 +886,7 @@ async def submit_testing(
 
     try:
         try:
-            wd = _get_workflow_data(project_slug)
+            wd = _get_workflow_data(workflow_id)
         except HTTPException as e:
             if e.status_code == 404:
                 return JSONResponse(status_code=404, content=TestingResponse(
