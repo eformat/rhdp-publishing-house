@@ -890,14 +890,15 @@ async def submit_testing(
         except HTTPException as e:
             if e.status_code == 404:
                 return JSONResponse(status_code=404, content=TestingResponse(
-                    status=404, error=f"No workflow found for {project_slug}",
+                    status=404, error=f"No workflow found for {workflow_id}",
                 ).model_dump())
             raise
 
         wf_uuid = wd.get("workflow_id", "")
+        project_slug = wd.get("projectId", "")
         if not wf_uuid:
             return JSONResponse(status_code=404, content=TestingResponse(
-                status=404, error=f"No workflow found for {project_slug}",
+                status=404, error=f"No workflow found for {workflow_id}",
             ).model_dump())
 
         current = _get_workflow_data(wf_uuid, minimal=True).get("stage", "unknown")
