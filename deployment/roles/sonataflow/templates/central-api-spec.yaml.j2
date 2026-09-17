@@ -45,7 +45,7 @@ paths:
   /jira/epic/update:
     post:
       operationId: updateJiraEpic
-      summary: Update Jira epic description after pre-intake approval
+      summary: Update Jira epic description and create initial tasks after pre-intake approval
       requestBody:
         required: true
         content:
@@ -53,12 +53,9 @@ paths:
             schema:
               type: object
               required:
-                - epic_key
                 - businessKey
                 - deploymentMode
               properties:
-                epic_key:
-                  type: string
                 businessKey:
                   type: string
                   description: Project ID used as workflow business key

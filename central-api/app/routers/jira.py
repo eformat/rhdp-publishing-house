@@ -39,7 +39,6 @@ class CreateEpicResponse(BaseModel):
 
 
 class UpdateEpicRequest(BaseModel):
-    epic_key: str
     businessKey: str  # Project ID used as workflow business key
     deploymentMode: str  # Workflow type (rhdp-published, field-source, etc.)
 
@@ -723,6 +722,11 @@ def update_epic(
     workflow_data = _get_workflow_data_by_business_key(body.businessKey, body.deploymentMode, settings)
     workflow_type = body.deploymentMode  # Already in correct format (rhdp-published)
 
+    # Get epic_key from workflow data
+    epic_key = workflow_data.get("epic_key", "")
+    if not epic_key:
+        raise HTTPException(status_code=400, detail="Epic key not found in workflow data")
+
     # Rebuild epic description with final values from workflow data
     if workflow_type in ("rhdp-published", "onboarded"):
         summary, description_adf = _format_onboarded_epic(workflow_data)
@@ -738,7 +742,7 @@ def update_epic(
     }
 
     req = urllib.request.Request(
-        f"{settings.jira_url}/rest/api/3/issue/{body.epic_key}",
+        f"{settings.jira_url}/rest/api/3/issue/{epic_key}",
         data=json.dumps({"fields": update_fields}).encode(),
         headers=_jira_headers(settings),
         method="PUT",
@@ -746,7 +750,7 @@ def update_epic(
 
     try:
         with urllib.request.urlopen(req, context=_SSL_CTX, timeout=15):
-            logger.info("jira: updated epic %s after pre-intake approval", body.epic_key)
+            logger.info("jira: updated epic %s after pre-intake approval", epic_key)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Jira epic update failed: {e}")
 
@@ -758,7 +762,7 @@ def update_epic(
         "project": {"key": settings.jira_project_key},
         "summary": "[PH] Intake",
         "issuetype": {"name": "Task"},
-        "parent": {"key": body.epic_key},
+        "parent": {"key": epic_key},
         "labels": ["publishing-house", "ph:intake"],
         "assignee": None,
         STORY_POINTS_FIELD: float(POINTS["intake"]),
@@ -781,16 +785,16 @@ def update_epic(
             method="POST",
         )
         with urllib.request.urlopen(intake_req, context=_SSL_CTX, timeout=10):
-            logger.info("jira: created Intake task under epic %s", body.epic_key)
+            logger.info("jira: created Intake task under epic %s", epic_key)
     except Exception as e:
-        logger.warning("jira: Intake task creation failed for epic %s: %s", body.epic_key, e)
+        logger.warning("jira: Intake task creation failed for epic %s: %s", epic_key, e)
 
     # Create Testing task
     testing_fields = {
         "project": {"key": settings.jira_project_key},
         "summary": "[PH] Testing",
         "issuetype": {"name": "Task"},
-        "parent": {"key": body.epic_key},
+        "parent": {"key": epic_key},
         "labels": ["publishing-house", "ph:testing", "rhdp_ops"],
         "assignee": None,
         STORY_POINTS_FIELD: float(POINTS["testing"]),
@@ -812,9 +816,9 @@ def update_epic(
             method="POST",
         )
         with urllib.request.urlopen(testing_req, context=_SSL_CTX, timeout=10):
-            logger.info("jira: created Testing task under epic %s", body.epic_key)
+            logger.info("jira: created Testing task under epic %s", epic_key)
     except Exception as e:
-        logger.warning("jira: Testing task creation failed for epic %s: %s", body.epic_key, e)
+        logger.warning("jira: Testing task creation failed for epic %s: %s", epic_key, e)
 
     # Create Development CI task only if not zero_touch
     if showroom_type != "zero_touch":
@@ -822,7 +826,7 @@ def update_epic(
             "project": {"key": settings.jira_project_key},
             "summary": "[PH] Development CI",
             "issuetype": {"name": "Task"},
-            "parent": {"key": body.epic_key},
+            "parent": {"key": epic_key},
             "labels": ["publishing-house", "ph:dev-ci"],
             "assignee": None,
             STORY_POINTS_FIELD: float(POINTS["dev-ci"]),
@@ -845,14 +849,14 @@ def update_epic(
                 method="POST",
             )
             with urllib.request.urlopen(dev_ci_req, context=_SSL_CTX, timeout=10):
-                logger.info("jira: created Dev CI task under epic %s", body.epic_key)
+                logger.info("jira: created Dev CI task under epic %s", epic_key)
         except Exception as e:
-            logger.warning("jira: Dev CI task creation failed for epic %s: %s", body.epic_key, e)
+            logger.warning("jira: Dev CI task creation failed for epic %s: %s", epic_key, e)
     else:
         logger.info("jira: skipping Dev CI task for zero_touch showroom type")
 
-    jira_url = f"{settings.jira_url}/browse/{body.epic_key}"
-    return UpdateEpicResponse(epic_key=body.epic_key, jira_url=jira_url)
+    jira_url = f"{settings.jira_url}/browse/{epic_key}"
+    return UpdateEpicResponse(epic_key=epic_key, jira_url=jira_url)
 
 
 def _lookup_jira_account_id(email: str, settings: Settings) -> dict | None:
