@@ -19,11 +19,10 @@ class Settings(BaseSettings):
     ph_api_key: str  # Bearer token for write endpoints
 
     # SonataFlow Configuration
-    # Runtime pod — receives CloudEvents
-    sonataflow_url: str = "http://rhdp-published.publishing-house:80"
+    # Workflow proxy — routes to correct workflow based on X-Workflow-Type header
+    sonataflow_url: str = "http://workflow-proxy.publishing-house:80"
     # GraphQL endpoint for workflow state queries
     # dev mode: runtime pod has embedded /graphql
-    # sonataflow_graphql_url: str = "http://rhdp-published.publishing-house:80"
     # preview mode: use platform data-index service instead
     sonataflow_graphql_url: str = "http://sonataflow-platform-data-index-service.publishing-house:80"
 

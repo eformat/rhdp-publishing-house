@@ -7,7 +7,7 @@ const EXPIRY_STORAGE_KEY = 'ph-central-token-expiry';
 
 const GRAPHQL_QUERY = `
   query GetPublishingHouseWorkflows {
-    ProcessInstances(where: { processId: { equal: "publishinghouseworkflow" }, state: { in: [ACTIVE, ERROR, SUSPENDED, COMPLETED] } }) {
+    ProcessInstances(where: { state: { in: [ACTIVE, ERROR, SUSPENDED, COMPLETED] } }) {
       id
       businessKey
       processId

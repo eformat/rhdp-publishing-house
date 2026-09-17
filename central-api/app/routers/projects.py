@@ -92,7 +92,7 @@ class CreateCatalogResponse(BaseModel):
 
 class StartWorkflowRequest(BaseModel):
     projectId: str
-    deploymentMode: str = "rhdp_published"
+    deploymentMode: str = "rhdp-published"
     ssoUser: str
     ssoEmail: str
     assetTitle: str
@@ -541,9 +541,16 @@ async def start_workflow(
         "workflow_id": workflow_id,
     }
 
-    # Start SonataFlow workflow instance with businessKey
-    workflow_url = f"{settings.sonataflow_url.rstrip('/')}/rhdp-published?businessKey={project_name}"
-    headers = {"Content-Type": "application/json"}
+    # deploymentMode already uses hyphen format (rhdp-published, field-source)
+    workflow_type = body.deploymentMode
+
+    # Start SonataFlow workflow instance with businessKey via proxy
+    # Proxy routes to correct workflow based on X-Workflow-Type header
+    workflow_url = f"{settings.sonataflow_url.rstrip('/')}/{workflow_type}?businessKey={project_name}"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Workflow-Type": workflow_type,
+    }
 
     req = urllib.request.Request(
         workflow_url,
@@ -1261,7 +1268,7 @@ async def _create_catalog_background(project_id: str, body: CreateCatalogRequest
                 "github_user": wf_data.get("ssoUser", ""),
                 "project_description": wf_data.get("projectDescription", ""),
                 "content_type": wf_data.get("contentType", "lab"),
-                "deployment_mode": "rhdp_published",
+                "deployment_mode": "rhdp-published",
                 "initiative_key": wf_data.get("initiativeKey", "rh1_2027"),
                 "showroom_type": wf_data.get("showroomType", "classic"),
                 "intake_type": wf_data.get("intakeType", "new"),

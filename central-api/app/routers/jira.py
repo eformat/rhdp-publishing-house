@@ -10,7 +10,7 @@ import urllib.request
 import uuid
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 
@@ -28,7 +28,6 @@ _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 
 class CreateEpicRequest(BaseModel):
-    epic_type: str  # "rhdp_published" | "field_source"
     fields: dict    # All template fields as key-value pairs
 
 
@@ -40,7 +39,6 @@ class CreateEpicResponse(BaseModel):
 
 class UpdateEpicRequest(BaseModel):
     epic_key: str
-    epic_type: str
     proforma_form_id: str = ""
     fields: dict = {}  # Fallback if no ProForma
 
@@ -533,21 +531,25 @@ def create_epic(
     body: CreateEpicRequest,
     _caller: str = Depends(_require_auth),
     settings: Settings = Depends(get_settings),
+    x_workflow_type: str = Header(alias="X-Workflow-Type"),
 ):
     """Create Jira epic with rich description and optional ProForma form.
     Called by SonataFlow during the CreateEpic state with all template fields."""
     if not settings.jira_url:
         raise HTTPException(status_code=503, detail="Jira not configured")
 
+    # Normalize workflow type (accept both - and _)
+    workflow_type = x_workflow_type.replace("_", "-")
+
     # Format epic summary and description based on type
-    if body.epic_type in ("rhdp_published", "onboarded"):
+    if workflow_type in ("rhdp-published", "onboarded"):
         summary, description_adf = _format_onboarded_epic(body.fields)
         labels = ["publishing-house", "ph-onboarded"]
-    elif body.epic_type == "field_source":
+    elif workflow_type == "field-source":
         summary, description_adf = _format_field_source_epic(body.fields)
         labels = ["publishing-house", "ph-field-source"]
     else:
-        raise HTTPException(status_code=400, detail=f"Unknown epic_type: {body.epic_type}")
+        raise HTTPException(status_code=400, detail=f"Unknown workflow type: {workflow_type}")
 
     # Add content type label
     if body.fields.get("contentType"):
@@ -702,22 +704,26 @@ def update_epic(
     body: UpdateEpicRequest,
     _caller: str = Depends(_require_auth),
     settings: Settings = Depends(get_settings),
+    x_workflow_type: str = Header(alias="X-Workflow-Type"),
 ):
     """Update Jira epic description after pre-intake approval.
     Reads ProForma form if available, otherwise uses workflow fields."""
     if not settings.jira_url:
         raise HTTPException(status_code=503, detail="Jira not configured")
 
+    # Normalize workflow type (accept both - and _)
+    workflow_type = x_workflow_type.replace("_", "-")
+
     # Use workflow fields (ProForma removed - fields stored in description only)
     final_fields = body.fields
 
     # Rebuild epic description with final values
-    if body.epic_type in ("rhdp_published", "onboarded"):
+    if workflow_type in ("rhdp-published", "onboarded"):
         summary, description_adf = _format_onboarded_epic(final_fields)
-    elif body.epic_type == "field_source":
+    elif workflow_type == "field-source":
         summary, description_adf = _format_field_source_epic(final_fields)
     else:
-        raise HTTPException(status_code=400, detail=f"Unknown epic_type: {body.epic_type}")
+        raise HTTPException(status_code=400, detail=f"Unknown workflow type: {workflow_type}")
 
     # Update epic
     update_fields = {

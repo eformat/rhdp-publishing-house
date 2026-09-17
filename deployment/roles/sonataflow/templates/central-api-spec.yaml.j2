@@ -10,6 +10,14 @@ paths:
     post:
       operationId: createJiraEpic
       summary: Create a Jira epic with rich description and optional ProForma form
+      parameters:
+        - name: X-Workflow-Type
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [rhdp-published, rhdp_published, field-source, field_source]
+          description: Workflow type (required header)
       requestBody:
         required: true
         content:
@@ -17,13 +25,8 @@ paths:
             schema:
               type: object
               required:
-                - epic_type
                 - fields
               properties:
-                epic_type:
-                  type: string
-                  enum: [rhdp_published, field_source]
-                  description: Type of epic to create
                 fields:
                   type: object
                   description: All template fields as key-value pairs
@@ -47,6 +50,14 @@ paths:
     post:
       operationId: updateJiraEpic
       summary: Update Jira epic description after pre-intake approval
+      parameters:
+        - name: X-Workflow-Type
+          in: header
+          required: true
+          schema:
+            type: string
+            enum: [rhdp-published, rhdp_published, field-source, field_source]
+          description: Workflow type (required header)
       requestBody:
         required: true
         content:
@@ -55,13 +66,9 @@ paths:
               type: object
               required:
                 - epic_key
-                - epic_type
               properties:
                 epic_key:
                   type: string
-                epic_type:
-                  type: string
-                  enum: [rhdp_published, field_source]
                 proforma_form_id:
                   type: string
                 fields:

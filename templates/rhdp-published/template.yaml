@@ -283,7 +283,7 @@ spec:
           content-type: 'application/json'
         body:
           projectId: ph-${{ parameters.project_name }}
-          deploymentMode: rhdp_published
+          deploymentMode: rhdp-published
           ssoUser: ${{ user.entity.metadata.name }}
           ssoEmail: ${{ user.entity.spec.profile.email }}
           assetTitle: ${{ parameters.asset_title }}

@@ -101,6 +101,35 @@
     state: present
     definition: "{{ lookup('template', 'rhdp-published-workflow.yaml.j2') | from_yaml }}"
 
+# --- Workflow Deployment ---
+
+- name: Deploy RHDP Published workflow runtime
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'deployment-rhdp-published.yaml.j2') | from_yaml }}"
+
+- name: Create RHDP Published workflow service
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'svc-rhdp-published.yaml.j2') | from_yaml }}"
+
+# --- Workflow Proxy ---
+
+- name: Create workflow proxy configuration
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'cm-workflow-proxy.yaml.j2') | from_yaml }}"
+
+- name: Deploy workflow proxy
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'deployment-workflow-proxy.yaml.j2') | from_yaml }}"
+
+- name: Create workflow proxy service
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'svc-workflow-proxy.yaml.j2') | from_yaml }}"
+
 # --- Management Console ---
 
 - name: Deploy SonataFlow Management Console

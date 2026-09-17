@@ -186,11 +186,9 @@ spec:
         type: operation
         actions:
           - name: CreateJiraEpic
-            condition: "${ .deploymentMode == \"rhdp_published\" }"
             functionRef:
               refName: createjiraepic
               arguments:
-                epic_type: .deploymentMode
                 fields: .
             actionDataFilter:
               toStateData: .epicResponse
@@ -316,12 +314,11 @@ spec:
         type: operation
         actions:
           - name: UpdateJiraEpic
-            condition: "${ .deploymentMode == \"rhdp_published\" and .epic_key != \"\" }"
+            condition: "${ .epic_key != \"\" }"
             functionRef:
               refName: updatejiraepic
               arguments:
                 epic_key: .epic_key
-                epic_type: .deploymentMode
                 proforma_form_id: (.proforma_form_id // "")
                 fields: .
         transition:
@@ -497,7 +494,6 @@ spec:
         type: operation
         actions:
           - name: SyncJiraIntake
-            condition: "${ .deploymentMode == \"rhdp_published\" }"
             functionRef:
               refName: syncjiratasks
               arguments:
@@ -552,7 +548,6 @@ spec:
         type: operation
         actions:
           - name: SyncJiraEnvSetup
-            condition: "${ .deploymentMode == \"rhdp_published\" }"
             functionRef:
               refName: syncjiratasks
               arguments:
@@ -599,7 +594,6 @@ spec:
         type: operation
         actions:
           - name: SyncJiraDev
-            condition: "${ .deploymentMode == \"rhdp_published\" }"
             functionRef:
               refName: syncjiratasks
               arguments:
@@ -644,7 +638,6 @@ spec:
         type: operation
         actions:
           - name: SyncJiraFinal
-            condition: "${ .deploymentMode == \"rhdp_published\" }"
             functionRef:
               refName: syncjiratasks
               arguments:
