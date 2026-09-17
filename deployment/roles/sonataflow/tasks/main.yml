@@ -82,12 +82,12 @@
 
 - name: Render workflow input schema
   ansible.builtin.set_fact:
-    _workflow_input_schema: "{{ lookup('template', 'workflow-input-schema.json.j2') | string }}"
+    _workflow_input_schema: "{{ lookup('template', 'rhdp-published-input-schema.json.j2') | string }}"
 
 - name: Create workflow input schema ConfigMap
   kubernetes.core.k8s:
     state: present
-    definition: "{{ lookup('template', 'cm-workflow-input-schema.yaml.j2') }}"
+    definition: "{{ lookup('template', 'cm-rhdp-published-input-schema.yaml.j2') }}"
 
 - name: Create central-api OpenAPI spec ConfigMap
   kubernetes.core.k8s:
@@ -96,10 +96,10 @@
 
 # --- SonataFlow CR ---
 
-- name: Deploy publishing house workflow
+- name: Deploy RHDP Published workflow
   kubernetes.core.k8s:
     state: present
-    definition: "{{ lookup('template', 'sonataflow-workflow.yaml.j2') | from_yaml }}"
+    definition: "{{ lookup('template', 'rhdp-published-workflow.yaml.j2') | from_yaml }}"
 
 # --- Management Console ---
 
@@ -123,5 +123,5 @@
     msg:
       - "SonataFlow platform and workflow deployed in {{ app_namespace }}"
       - "Data Index: http://sonataflow-platform-data-index-service.{{ app_namespace }}.svc.cluster.local"
-      - "Workflow: publishinghouseworkflow"
+      - "Workflow: rhdp-published"
       - "Management Console: https://sonataflow-management-console-{{ app_namespace }}.{{ ocp_apps_domain }}"
