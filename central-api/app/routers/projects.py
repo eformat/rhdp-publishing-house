@@ -883,6 +883,7 @@ async def submit_testing(
     allowed = GROUP_BITS["rhdp-operations"] | GROUP_BITS["rhdp-administrators"]
     _require_group(groups, allowed, "rhdp-operations or rhdp-administrators")
     stage = None
+    project_slug = workflow_id  # Default to workflow_id, will be updated from workflow data
 
     try:
         try:

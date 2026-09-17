@@ -7,10 +7,11 @@ from datetime import datetime
 
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Query, Security
+from fastapi import FastAPI, Depends, HTTPException, Query, Security, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 
 from .config import get_settings, Settings
 from .models import HealthResponse
@@ -73,6 +74,18 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
             allow_credentials=True,
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        """Add CORS headers to HTTPException responses."""
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+            headers={
+                "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+                "Access-Control-Allow-Credentials": "true",
+            },
         )
 
     @app.get(f"{settings.api_prefix}/health", response_model=HealthResponse)
