@@ -149,12 +149,12 @@ spec:
         - tags
       properties:
         project_name:
-          title: Project Name (slug)
+          title: GitHub Repository Name
           type: string
-          description: "Repository name will be: ph-{your-input}"
+          description: Choose a meaningful and unique name for your GitHub repository
           ui:placeholder: "openshift-ai-workshop"
           pattern: '^[a-z0-9-]+$'
-          ui:help: "Project will be created as: ph-{your-input}. Use lowercase letters, numbers, and hyphens only"
+          ui:help: "Choose a meaningful and unique name. The prefix 'ph-' will be automatically prepended (don't add it yourself). Use lowercase letters, numbers, and hyphens only."
 
         github_users:
           title: GitHub Collaborators
@@ -227,18 +227,6 @@ spec:
           default: openshift
           ui:help: Choose the base platform for your lab environment
 
-        showroom_type:
-          title: Showroom Type
-          type: string
-          enum:
-            - classic
-            - zero_touch
-          enumNames:
-            - Classic (standard Showroom)
-            - Zero Touch (embedded automation)
-          default: classic
-          ui:help: Classic = standard Showroom lab. Zero Touch = embedded runtime/setup automation.
-
       dependencies:
         platform:
           oneOf:
@@ -258,6 +246,17 @@ spec:
                     - "RHEL 10"
                   default: "9"
                   ui:help: Which RHEL version does your lab require?
+                showroom_type:
+                  title: Showroom Type
+                  type: string
+                  enum:
+                    - classic
+                    - zero_touch
+                  enumNames:
+                    - Classic (standard Showroom)
+                    - Zero Touch (embedded automation)
+                  default: classic
+                  ui:help: Classic = standard Showroom lab. Zero Touch = embedded runtime/setup automation.
             - properties:
                 platform:
                   const: openshift
@@ -283,7 +282,7 @@ spec:
                     - rosa
                     - aro
                   enumNames:
-                    - "No - Use standard OpenShift on CNV"
+                    - "No - Use standard OpenShift"
                     - "ROSA (Red Hat OpenShift Service on AWS)"
                     - "ARO (Azure Red Hat OpenShift)"
                   default: none
@@ -300,6 +299,18 @@ spec:
                     - Multinode
                   default: sno
                   ui:help: Single node for simple labs, multinode for production-like environments
+
+                showroom_type:
+                  title: Showroom Type
+                  type: string
+                  enum:
+                    - classic
+                    - zero_touch
+                  enumNames:
+                    - Classic (standard Showroom)
+                    - Zero Touch (embedded automation)
+                  default: classic
+                  ui:help: Classic = standard Showroom lab. Zero Touch = embedded runtime/setup automation.
 
   steps:
     # Step 1: Check if project name is already taken

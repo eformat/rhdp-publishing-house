@@ -763,6 +763,8 @@ export function WorkflowDetailPage() {
                         >
                           <MenuItem value="cnv">CNV</MenuItem>
                           <MenuItem value="aws">AWS</MenuItem>
+                          <MenuItem value="rosa">ROSA</MenuItem>
+                          <MenuItem value="aro">ARO</MenuItem>
                         </Select>
                       </FormControl>
                     </>
@@ -781,7 +783,6 @@ export function WorkflowDetailPage() {
                         >
                           <MenuItem value="sno">SNO</MenuItem>
                           <MenuItem value="multinode">Multinode</MenuItem>
-                          <MenuItem value="rosa">ROSA</MenuItem>
                         </Select>
                       </FormControl>
                     </>

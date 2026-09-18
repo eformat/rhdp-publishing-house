@@ -47,12 +47,14 @@ const useStyles = makeStyles(theme => ({
 
 interface DeleteDialogProps {
   open: boolean;
+  projectId: string;
   entity: Entity | null;
+  repoUrl?: string;
   onClose: () => void;
   onDeleted: () => void;
 }
 
-export function DeleteDialog({ open, entity, onClose, onDeleted }: DeleteDialogProps) {
+export function DeleteDialog({ open, projectId, entity, repoUrl, onClose, onDeleted }: DeleteDialogProps) {
   const classes = useStyles();
   const configApi = useApi(configApiRef);
   const discoveryApi = useApi(discoveryApiRef);
@@ -65,8 +67,6 @@ export function DeleteDialog({ open, entity, onClose, onDeleted }: DeleteDialogP
   const [result, setResult] = useState<DeleteProjectResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const slug = entity?.metadata?.name ?? '';
-
   const handleClose = useCallback(() => {
     setDeleteRepo(false);
     setDeleting(false);
@@ -76,25 +76,25 @@ export function DeleteDialog({ open, entity, onClose, onDeleted }: DeleteDialogP
   }, [onClose]);
 
   const handleDelete = useCallback(async () => {
-    if (!entity) return;
+    if (!projectId) return;
     setDeleting(true);
     setError(null);
     setResult(null);
 
     try {
       const client = createPhWorkflowsClient({ centralApiUrl, discoveryApi, fetchApi, identityApi });
-      const res = await client.deleteProject(slug, deleteRepo);
+      const res = await client.deleteProject(projectId, deleteRepo);
       setResult(res);
     } catch (e: any) {
       setError(e.message || 'Unknown error');
     } finally {
       setDeleting(false);
     }
-  }, [entity, slug, deleteRepo, discoveryApi, fetchApi, identityApi]);
+  }, [projectId, deleteRepo, centralApiUrl, discoveryApi, fetchApi, identityApi]);
 
   return (
     <Dialog open={open} onClose={deleting || result ? undefined : handleClose} maxWidth="sm" fullWidth disableEscapeKeyDown={!!result || deleting}>
-      <DialogTitle>Delete Component: {slug}</DialogTitle>
+      <DialogTitle>Delete Project: {projectId}</DialogTitle>
       <DialogContent>
         {!result && !error && (
           <>
@@ -126,16 +126,18 @@ export function DeleteDialog({ open, entity, onClose, onDeleted }: DeleteDialogP
                 <ListItemText primary="Archive the Jira epic" />
               </ListItem>
             </List>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={deleteRepo}
-                  onChange={e => setDeleteRepo(e.target.checked)}
-                  color="secondary"
-                />
-              }
-              label="Also delete the GitHub repository"
-            />
+            {repoUrl && (
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={deleteRepo}
+                    onChange={e => setDeleteRepo(e.target.checked)}
+                    color="secondary"
+                  />
+                }
+                label="Also delete the GitHub repository"
+              />
+            )}
           </>
         )}
 

@@ -42,7 +42,7 @@ const useStyles = makeStyles(theme => ({
 }));
 
 interface ComponentRow {
-  entity: Entity;
+  entity: Entity | null;
   name: string;
   description: string;
   owner: string;
@@ -50,25 +50,25 @@ interface ComponentRow {
   jiraUrl: string;
   jiraLabel: string;
   contentType: string;
+  deploymentMode: string;
   createdAt: string;
   workflowState: string;
 }
 
-function toRow(entity: Entity, wfMap: Record<string, WorkflowSummary>): ComponentRow {
-  const annotations = entity.metadata?.annotations ?? {};
+function toRow(wf: WorkflowSummary, entityMap: Record<string, Entity>): ComponentRow {
+  const entity = entityMap[wf.projectId] || null;
+  const annotations = entity?.metadata?.annotations ?? {};
   const slug = annotations['github.com/project-slug'] ?? '';
-  const repoUrl = slug ? `https://github.com/${slug}` : '';
-  const name = entity.metadata?.name ?? '';
+  const repoUrl = wf.repoUrl || (slug ? `https://github.com/${slug}` : '');
 
-  const wf = wfMap[name];
-  const owner = annotations['ph.rhdp.io/owner'] ?? '';
+  const owner = wf.owner || annotations['ph.rhdp.io/owner'] || '';
 
-  const links = (entity.metadata as any)?.links ?? [];
+  const links = entity ? ((entity.metadata as any)?.links ?? []) : [];
   const jiraLink = links.find((l: any) => l.title === 'Jira Epic' || (l.url && l.url.includes('atlassian.net/browse/')));
   const jiraUrl = jiraLink?.url || wf?.jiraUrl || '';
   const jiraLabel = jiraUrl ? (jiraUrl.split('/').pop() ?? 'Epic') : '';
 
-  const rawTs = annotations['ph.rhdp.io/created-at'] ?? '';
+  const rawTs = wf.startedAt || annotations['ph.rhdp.io/created-at'] || '';
   let createdAt = '';
   if (rawTs) {
     try { createdAt = new Date(rawTs).toLocaleDateString(); } catch { createdAt = rawTs; }
@@ -76,13 +76,14 @@ function toRow(entity: Entity, wfMap: Record<string, WorkflowSummary>): Componen
 
   return {
     entity,
-    name,
-    description: entity.metadata?.description ?? '',
+    name: wf.projectId,
+    description: wf.projectDescription || entity?.metadata?.description || '',
     owner,
     repoUrl,
     jiraUrl,
     jiraLabel,
-    contentType: annotations['ph.rhdp.io/content-type'] ?? '',
+    contentType: wf.contentType || annotations['ph.rhdp.io/content-type'] || '',
+    deploymentMode: wf.deploymentMode || '',
     createdAt,
     workflowState: wf?.state ?? '',
   };
@@ -99,12 +100,13 @@ export function MaintenancePage() {
   const { isAdmin, loading: groupsLoading } = useUserGroups();
   const [activeTab, setActiveTab] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [deleteTarget, setDeleteTarget] = useState<Entity | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ projectId: string; entity: Entity | null; repoUrl: string } | null>(null);
 
   const client = createPhWorkflowsClient({ centralApiUrl, discoveryApi, fetchApi, identityApi });
 
   const { value, loading, error } = useAsync(async () => {
-    const [catalogResult, workflows] = await Promise.all([
+    const [workflows, catalogResult] = await Promise.all([
+      client.getWorkflows(),
       catalogApi.getEntities({
         filter: { kind: 'Component', 'metadata.tags': 'publishing-house' },
         fields: [
@@ -117,26 +119,27 @@ export function MaintenancePage() {
           'kind',
         ],
       }),
-      client.getWorkflows(),
     ]);
-    const wfMap: Record<string, WorkflowSummary> = {};
-    for (const w of workflows) {
-      if (w.projectId) wfMap[w.projectId] = w;
+
+    // Build map of catalog entities by project ID
+    const entityMap: Record<string, Entity> = {};
+    for (const entity of catalogResult.items) {
+      const name = entity.metadata?.name;
+      if (name) {
+        entityMap[name] = entity;
+      }
     }
-    const projects = catalogResult.items.filter(e => {
-      const ann = e.metadata?.annotations ?? {};
-      return ann['ph.rhdp.io/owner'] || ann['ph.rhdp.io/content-type'];
-    });
-    return { entities: projects, wfMap };
+
+    return { workflows, entityMap };
   }, [refreshKey]);
 
   const handleRefresh = useCallback(() => {
     setRefreshKey(k => k + 1);
   }, []);
 
-  const entities = value?.entities ?? [];
-  const wfMap = value?.wfMap ?? {};
-  const rows = entities.map(e => toRow(e, wfMap));
+  const workflows = value?.workflows ?? [];
+  const entityMap = value?.entityMap ?? {};
+  const rows = workflows.map(wf => toRow(wf, entityMap));
 
   const columns: TableColumn<ComponentRow>[] = [
     {
@@ -160,6 +163,17 @@ export function MaintenancePage() {
     {
       title: 'Type',
       field: 'contentType',
+    },
+    {
+      title: 'Mode',
+      field: 'deploymentMode',
+      render: (row: ComponentRow) => {
+        const mode = row.deploymentMode;
+        if (mode === 'rhdp-published') return 'RHDP Published';
+        if (mode === 'self-published') return 'Self Published';
+        if (mode === 'express') return 'Express';
+        return mode || '—';
+      },
     },
     {
       title: 'Created',
@@ -204,7 +218,7 @@ export function MaintenancePage() {
               className={classes.deleteButton}
               onClick={e => {
                 e.stopPropagation();
-                setDeleteTarget(row.entity);
+                setDeleteTarget({ projectId: row.name, entity: row.entity, repoUrl: row.repoUrl });
               }}
             >
               <DeleteIcon fontSize="small" />
@@ -234,7 +248,7 @@ export function MaintenancePage() {
   return (
     <Page themeId="tool">
       <Header title="Publishing House" subtitle="Maintenance and administration">
-        <HeaderLabel label="Components" value={String(entities.length)} />
+        <HeaderLabel label="Projects" value={String(workflows.length)} />
       </Header>
       <Content>
         <Tabs
@@ -278,7 +292,9 @@ export function MaintenancePage() {
             />
             <DeleteDialog
               open={!!deleteTarget}
-              entity={deleteTarget}
+              projectId={deleteTarget?.projectId || ''}
+              entity={deleteTarget?.entity || null}
+              repoUrl={deleteTarget?.repoUrl}
               onClose={() => setDeleteTarget(null)}
               onDeleted={() => {
                 setDeleteTarget(null);

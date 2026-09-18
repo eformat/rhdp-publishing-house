@@ -2190,6 +2190,7 @@ async def delete_project(
                 "Authorization": f"Bearer {settings.rhdh_service_token}",
                 "Accept": "application/json",
             }
+            catalog_items_deleted = 0
 
             # Try to get entity (may not exist if already deleted)
             entity = None
@@ -2200,7 +2201,7 @@ async def delete_project(
                     entity = json.loads(r.read().decode())
             except urllib.error.HTTPError as e:
                 if e.code == 404:
-                    logger.info("delete: entity not found for %s (already deleted)", project_slug)
+                    logger.info("delete: entity not found for %s (not yet created)", project_slug)
                 else:
                     raise
 
@@ -2214,6 +2215,7 @@ async def delete_project(
                         headers=catalog_headers,
                     )
                     urllib.request.urlopen(req, context=_SSL_CTX, timeout=10)
+                    catalog_items_deleted += 1
                     logger.info("delete: removed catalog entity %s", project_slug)
 
             # Delete location(s) - check all locations for orphaned entries
@@ -2233,11 +2235,15 @@ async def delete_project(
                             headers=catalog_headers,
                         )
                         urllib.request.urlopen(req, context=_SSL_CTX, timeout=10)
+                        catalog_items_deleted += 1
                         logger.info("delete: removed catalog location %s for %s", loc_id, project_slug)
                     except Exception as e:
                         logger.warning("delete: failed to remove location %s: %s", loc_id, e)
 
-            result.catalog_cleaned = True
+            # Only mark as cleaned if something was actually deleted
+            result.catalog_cleaned = catalog_items_deleted > 0
+            if catalog_items_deleted == 0:
+                logger.info("delete: no catalog items to remove for %s (not yet registered)", project_slug)
         except Exception as e:
             result.errors.append(f"Catalog cleanup failed: {e}")
             logger.warning("delete: catalog cleanup failed for %s: %s", project_slug, e)
