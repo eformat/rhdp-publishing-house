@@ -228,12 +228,15 @@ def _format_onboarded_epic(fields: dict) -> tuple[str, dict]:
     # Technical Details
     ai_req = "None"
     if fields.get("aiRelated"):
-        if fields.get("gpuNeeded"):
-            ai_req = "GPU"
-        elif fields.get("maasInstead"):
-            ai_req = "MaaS"
+        can_use_maas = fields.get("canUseMaas", True)
+        if not can_use_maas:
+            gpu_just = fields.get("gpuJustification", "")
+            ai_req = f"GPU: {gpu_just}" if gpu_just else "GPU (no justification provided)"
         else:
-            ai_req = "AI (unspecified)"
+            models = fields.get("maasModels", "")
+            ai_req = f"MaaS: {models}" if models else "MaaS (models not specified)"
+    else:
+        ai_req = "None"
 
     content.append(_build_adf_heading(2, "Technical Details"))
     tech_lines = [
