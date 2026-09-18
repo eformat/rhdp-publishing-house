@@ -1274,6 +1274,7 @@ async def _create_catalog_background(body: CreateCatalogRequest, settings):
         tmpdir = None
         try:
             from jinja2 import Template
+            from ruamel.yaml import YAML
 
             tmpdir = tempfile.mkdtemp()
             clone_url = f"https://x-access-token:{settings.github_token}@github.com/{repo_full_name}.git"
@@ -1321,18 +1322,22 @@ async def _create_catalog_background(body: CreateCatalogRequest, settings):
                     with open(template_file, 'r') as f:
                         content = f.read()
 
-                    # Render Jinja template
+                    # Render Jinja template (preserves YAML # comments by default)
                     template = Template(content)
                     rendered = template.render(values=template_values)
 
                     with open(template_file, 'w') as f:
                         f.write(rendered)
 
-            # Update spec.yaml with workflow metadata
+            # Update spec.yaml with workflow metadata (preserve comments)
             spec_path = os.path.join(tmpdir, "publishing-house", "spec.yaml")
             if os.path.exists(spec_path):
+                yaml_handler = YAML()
+                yaml_handler.preserve_quotes = True
+                yaml_handler.width = 4096
+
                 with open(spec_path, "r") as f:
-                    spec_data = yaml.safe_load(f)
+                    spec_data = yaml_handler.load(f)
 
                 if "project" not in spec_data:
                     spec_data["project"] = {}
@@ -1340,13 +1345,17 @@ async def _create_catalog_background(body: CreateCatalogRequest, settings):
                 spec_data["project"]["workflow_id"] = workflow_id
 
                 with open(spec_path, "w") as f:
-                    yaml.dump(spec_data, f, default_flow_style=False, sort_keys=False)
+                    yaml_handler.dump(spec_data, f)
 
-            # Update catalog-info.yaml with Jira link
+            # Update catalog-info.yaml with Jira link (preserve comments)
             catalog_path = os.path.join(tmpdir, "catalog-info.yaml")
             if os.path.exists(catalog_path) and jira_url:
+                yaml_handler = YAML()
+                yaml_handler.preserve_quotes = True
+                yaml_handler.width = 4096
+
                 with open(catalog_path, "r") as f:
-                    catalog_data = yaml.safe_load(f)
+                    catalog_data = yaml_handler.load(f)
 
                 if "metadata" not in catalog_data:
                     catalog_data["metadata"] = {}
@@ -1359,7 +1368,7 @@ async def _create_catalog_background(body: CreateCatalogRequest, settings):
                     catalog_data["metadata"]["links"].append(jira_link)
 
                 with open(catalog_path, "w") as f:
-                    yaml.dump(catalog_data, f, default_flow_style=False, sort_keys=False)
+                    yaml_handler.dump(catalog_data, f)
 
             # Commit and push
             subprocess.run(["git", "config", "user.email", "central-api@rhdp.io"], cwd=tmpdir, check=True, timeout=10)
