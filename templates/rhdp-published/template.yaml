@@ -255,7 +255,7 @@ spec:
             - AWS
             - Azure
           default: cnv
-          ui:help: Where will this run?
+          ui:help: "Where will this run? Note: AWS is automatically selected for GPU workloads"
 
         cluster_type:
           title: Cluster Type
@@ -318,7 +318,7 @@ spec:
           maasModels: ${{ (parameters.ai_related and parameters.can_use_maas and parameters.maas_models) or '' }}
           gpuJustification: ${{ (parameters.ai_related and not parameters.can_use_maas and parameters.gpu_justification) or '' }}
           partnersAccess: ${{ parameters.partners_access or false }}
-          cloudProvider: ${{ parameters.cloud_provider }}
+          cloudProvider: ${{ (parameters.ai_related and not parameters.can_use_maas) and 'aws' or parameters.cloud_provider }}
           clusterType: ${{ parameters.cluster_type }}
           ocpVersion: ${{ parameters.ocp_version }}
           automationType: ${{ parameters.automation_type }}
