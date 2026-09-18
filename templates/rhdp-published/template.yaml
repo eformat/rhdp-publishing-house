@@ -105,11 +105,6 @@ spec:
                   type: boolean
                   default: true
                   ui:help: Model-as-a-Service provides API access to AI models without requiring direct GPU hardware
-                partners_access:
-                  title: Should it be available to Partners?
-                  type: boolean
-                  default: false
-                  ui:help: Check if this content should be accessible to Red Hat partners
               dependencies:
                 can_use_maas:
                   oneOf:
@@ -124,6 +119,11 @@ spec:
                             rows: 2
                           ui:help: List the model(s) you need. See available models at https://maas-rhdp.apps.maas.redhatworkshops.io/models
                           ui:placeholder: "e.g., gpt-4o, claude-3-5-sonnet"
+                        partners_access:
+                          title: Should it be available to Partners?
+                          type: boolean
+                          default: false
+                          ui:help: Check if this content should be accessible to Red Hat partners
                     - properties:
                         can_use_maas:
                           const: false
@@ -135,6 +135,11 @@ spec:
                             rows: 4
                           ui:help: Onboarding requests that require direct GPU access will require strong justification. Explain why you need direct GPU access and what size GPU you require.
                           ui:placeholder: "Explain why MaaS cannot meet your needs and specify GPU requirements (e.g., A100 80GB for fine-tuning large language models)"
+                        partners_access:
+                          title: Should it be available to Partners?
+                          type: boolean
+                          default: false
+                          ui:help: Check if this content should be accessible to Red Hat partners
 
     - title: Project Setup
       required:
