@@ -80,6 +80,7 @@ spec:
           ui:widget: textarea
           ui:options:
             rows: 3
+          ui:help: 'Find current Sales Plays and TDPs at: https://saleshub.redhat.com/Link/Content/DC2HcDQDhMFbPGTRcCBX82V9DPcP'
 
         ai_related:
           title: Is this related to AI?
