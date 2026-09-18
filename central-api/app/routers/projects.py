@@ -310,6 +310,13 @@ def _get_workflow_from_runtime(business_key: str, deployment_mode: str):
         if isinstance(result, list):
             if len(result) == 0:
                 raise HTTPException(status_code=404, detail=f"No workflow found for businessKey={business_key}")
+            # Find the workflow that actually matches the businessKey
+            for wf in result:
+                wf_data = wf.get("workflowdata", {})
+                if wf_data.get("projectId") == business_key or wf_data.get("projectid") == business_key:
+                    return wf
+            # Fallback: if no match found, log warning and return first (old behavior)
+            logger.warning("_get_workflow_from_runtime: businessKey=%s not found in results, returning first", business_key)
             return result[0]
 
         return result
