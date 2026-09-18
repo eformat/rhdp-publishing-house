@@ -219,7 +219,7 @@ export function createPhWorkflowsClient(options: {
     return { summary: toSummary(inst), instance: inst };
   }
 
-  async function sendPreIntakeAction(
+  async function sendPreIntakeReviewAction(
     projectId: string,
     action: 'approved' | 'cancelled',
     fields?: Record<string, any>,
@@ -593,7 +593,7 @@ export function createPhWorkflowsClient(options: {
     getWorkflows,
     getWorkflow,
     getWorkflowById,
-    sendPreIntakeAction,
+    sendPreIntakeReviewAction,
     sendApprovalEvent,
     sendRejectionEvent,
     fetchValidationReport,
