@@ -86,23 +86,9 @@ spec:
           - contextAttributeName: projectid
         dataOnly: true
         kind: consumed
-        name: PreIntakeReviewRejectedEvent
-        source: publishing-house
-        type: ph.preintake-review.rejected
-      - correlation:
-          - contextAttributeName: projectid
-        dataOnly: true
-        kind: consumed
         name: PreIntakeReviewCancelledEvent
         source: publishing-house
         type: ph.preintake-review.cancelled
-      - correlation:
-          - contextAttributeName: projectid
-        dataOnly: true
-        kind: consumed
-        name: PreIntakeSubmittedEvent
-        source: publishing-house
-        type: ph.preintake.submitted
       - correlation:
           - contextAttributeName: projectid
         dataOnly: true
@@ -216,46 +202,12 @@ spec:
             } | del(.epicResponse)
         transition:
           nextState: PreIntakeReview
-      - name: PreIntake
-        type: event
-        exclusive: true
-        onEvents:
-          - eventRefs:
-              - PreIntakeSubmittedEvent
-            eventDataFilter:
-              toStateData: ".updatedFields"
-        stateDataFilter:
-          input: |
-            . + {
-              updatedFields: null,
-              reviewHistory: ((.reviewHistory // []) + [{
-                stage: "pre_intake",
-                action: "submitted",
-                timestamp: (now | tostring),
-                user: .ssoEmail
-              }])
-            }
-          output: |
-            . + (.updatedFields // {}) + {
-              reviewHistory: ((.reviewHistory // []) + [{
-                stage: "pre_intake",
-                action: "completed",
-                timestamp: (now | tostring),
-                user: .ssoEmail
-              }])
-            } | del(.updatedFields)
-        transition:
-          nextState: PreIntakeReview
       - name: PreIntakeReview
         type: event
         exclusive: true
         onEvents:
           - eventRefs:
               - PreIntakeReviewApprovedEvent
-            eventDataFilter:
-              toStateData: ".reviewAction"
-          - eventRefs:
-              - PreIntakeReviewRejectedEvent
             eventDataFilter:
               toStateData: ".reviewAction"
           - eventRefs:
@@ -277,19 +229,7 @@ spec:
             }
           output: |
             . + {
-              reviewHistory: ((.reviewHistory // []) + (if .reviewAction then [.reviewAction] else [] end)),
-              rejection: (
-                if .reviewAction and .reviewAction.action == "rejected"
-                then {
-                  isRejected: true,
-                  reviewerName: .reviewAction.user,
-                  reviewerStage: "preintake",
-                  timestamp: .reviewAction.timestamp,
-                  reasons: (.reviewAction.reasons // [])
-                }
-                else { isRejected: false }
-                end
-              )
+              reviewHistory: ((.reviewHistory // []) + (if .reviewAction then [.reviewAction] else [] end))
             } | del(.reviewAction)
         transition:
           nextState: PreIntakeReviewDecision
@@ -303,10 +243,6 @@ spec:
               }
             transition:
               nextState: Rejected
-          - name: Rejected
-            condition: "${ .rejection.isRejected == true }"
-            transition:
-              nextState: PreIntake
         defaultCondition:
           transition:
             nextState: UpdateEpic
