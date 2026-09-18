@@ -47,18 +47,15 @@ class IntakeResponse(BaseModel):
 
 
 class PreIntakeRequest(BaseModel):
-    action: str  # "approved" | "sendback" | "rejected"
+    """Pre-intake review with editable fields + action.
+
+    All workflow fields are optional (only include updated values).
+    Action must be 'approved' or 'cancelled'.
+    """
+    action: str  # "approved" | "cancelled"
     notes: str = ""
 
-
-class PreIntakeResponse(BaseModel):
-    status: str
-    project_id: str
-    action: str
-
-
-class PreIntakeUpdateRequest(BaseModel):
-    """Pre-intake update fields - all optional since not all may be updated."""
+    # Editable workflow fields (all optional)
     assetTitle: str = None
     projectDescription: str = None
     contentOutline: str = None
@@ -71,13 +68,20 @@ class PreIntakeUpdateRequest(BaseModel):
     maasModels: str = None
     gpuJustification: str = None
     partnersAccess: bool = None
+    platform: str = None
     cloudProvider: str = None
     clusterType: str = None
     ocpVersion: str = None
-    automationType: str = None
+    rhelVersion: str = None
     showroomType: str = None
     initiativeKey: str = None
     tags: list[str] = None
+
+
+class PreIntakeResponse(BaseModel):
+    status: str
+    project_id: str
+    action: str
 
 
 class CreateCatalogRequest(BaseModel):
@@ -434,12 +438,9 @@ def get_workflow_data_by_slug(slug: str, minimal: bool = False, auth: tuple[str,
 
 
 _STATE_MAP = {
-    "preintake": "pre_intake",
-    "preintakeinitialcomplete": "pre_intake",
-    "preintakeawaitupdate": "pre_intake",
     "preintakereview": "pre_intake_review",
     "preintakereviewdecision": "pre_intake_review",
-    "createepic": "pre_intake",
+    "createepic": "pre_intake_review",
     "updateepic": "intake",
     "intake": "intake",
     "contentreview": "content_review",
@@ -1080,7 +1081,11 @@ async def preintake_review(
     body: PreIntakeRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
-    """Handle pre-intake review actions: approve, reject (send back for fixes), or cancel (terminate)."""
+    """Handle pre-intake review with editable fields.
+
+    Reviewer can edit workflow fields and then approve or cancel.
+    On approve: saves updated fields to workflow data and advances workflow.
+    """
     owner, groups = auth
     # Require pre-intake reviewer or admin permissions
     _require_group(
@@ -1098,50 +1103,18 @@ async def preintake_review(
     timestamp = datetime.now(timezone.utc).isoformat()
 
     # Validate action
-    if body.action not in ("approved", "rejected", "cancelled"):
-        raise HTTPException(status_code=400, detail=f"Invalid action: {body.action}")
+    if body.action not in ("approved", "cancelled"):
+        raise HTTPException(status_code=400, detail=f"Invalid action: {body.action}. Only 'approved' or 'cancelled' allowed.")
 
-    # For rejection with notes, add them to workflow data (not CloudEvent)
-    if body.action == "rejected" and body.notes:
-        # Get FRESH notes via direct GraphQL query
-        query = """
-          query GetWorkflow($id: String!) {
-            ProcessInstances(where: { id: { equal: $id } }) {
-              id
-              variables
-            }
-          }
-        """
-        graphql_payload = json.dumps({"query": query, "variables": {"id": wf_uuid}}).encode()
-        graphql_req = urllib.request.Request(
-            f"{settings.sonataflow_graphql_url.rstrip('/')}/graphql",
-            data=graphql_payload,
-            headers={"Content-Type": "application/json"},
-        )
+    # Extract updated fields (exclude action and notes)
+    updated_fields = {k: v for k, v in body.dict().items() if v is not None and k not in ("action", "notes")}
 
-        with urllib.request.urlopen(graphql_req, context=_SSL_CTX, timeout=30) as resp:
-            result_data = json.loads(resp.read().decode())
-            instances = result_data.get("data", {}).get("ProcessInstances", [])
-            if instances:
-                variables = instances[0].get("variables", {})
-                workflowdata = variables.get("workflowdata", {})
-                existing_notes = workflowdata.get("notes", [])
-            else:
-                existing_notes = []
+    # Save updated fields to workflow data if approve action
+    if body.action == "approved" and updated_fields:
+        _patch_workflow_data(wf_uuid, updated_fields, settings=settings)
+        logger.info("pre-intake: saved %d updated field(s) for %s: %s", len(updated_fields), workflow_id, list(updated_fields.keys()))
 
-        rejection_notes = [
-            {
-                "text": body.notes,
-                "user": owner,
-                "stage": "pre_intake_review",
-                "timestamp": timestamp,
-                "type": "rejection"
-            }
-        ]
-        updated_notes = existing_notes + rejection_notes
-        _patch_workflow_data(wf_uuid, {"notes": updated_notes}, settings=settings)
-
-    # Build event data (without notes)
+    # Build event data
     event_data = {
         "user": owner,
         "stage": "pre_intake_review",
@@ -1152,7 +1125,6 @@ async def preintake_review(
     # Send appropriate CloudEvent
     event_type_map = {
         "approved": "ph.preintake-review.approved",
-        "rejected": "ph.preintake-review.rejected",
         "cancelled": "ph.preintake-review.cancelled",
     }
     event_type = event_type_map[body.action]
@@ -1165,47 +1137,6 @@ async def preintake_review(
         status="success",
         project_id=wd.get("projectId", workflow_id),
         action=body.action
-    )
-
-
-@router.post("/{workflow_id}/preintake/update")
-async def submit_preintake_update(
-    workflow_id: str,
-    body: PreIntakeUpdateRequest,
-    auth: tuple[str, int] = Depends(_require_auth),
-):
-    """Submit updated pre-intake fields after rejection.
-    Available to the project owner (developer) to make corrections."""
-    owner, groups = auth
-
-    wd = _get_workflow_data(workflow_id)
-    wf_uuid = workflow_id
-
-    _require_stage(wf_uuid, ["pre_intake"])
-
-    # Build updated fields dict (only include non-None values)
-    updated_fields = {k: v for k, v in body.dict().items() if v is not None}
-
-    if not updated_fields:
-        raise HTTPException(status_code=400, detail="No fields provided to update")
-
-    settings = get_settings()
-    timestamp = datetime.now(timezone.utc).isoformat()
-
-    # Send preintake submitted event with updated fields
-    # Note: The fields go directly in event_data because eventDataFilter.toStateData
-    # will assign the entire data object to .updatedFields
-    event_data = updated_fields
-
-    _send_cloud_event("ph.preintake.submitted", wf_uuid, event_data)
-
-    logger.info("pre-intake submitted by %s for %s with %d fields: %s", owner, workflow_id, len(updated_fields), list(updated_fields.keys()))
-    logger.info("contentOutline value: %s", updated_fields.get('contentOutline', 'NOT IN FIELDS')[:200] if 'contentOutline' in updated_fields else 'NOT IN FIELDS')
-
-    return PreIntakeResponse(
-        status="success",
-        project_id=wd.get("projectId", workflow_id),
-        action="update_submitted"
     )
 
 
