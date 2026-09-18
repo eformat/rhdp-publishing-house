@@ -43,7 +43,6 @@ export interface ProcessInstance {
 export type WorkflowStage =
   | 'init'
   | 'setup'
-  | 'pre_intake'
   | 'pre_intake_review'
   | 'intake'
   | 'review'

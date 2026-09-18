@@ -66,8 +66,7 @@ const PRE_INTAKE_STAGES: WorkflowStage[] = ['pre_intake', 'pre_intake_review'];
 // Expected next stages after approval/completion (matches workflow transitions)
 // Some stages can transition to multiple targets depending on decision
 const EXPECTED_NEXT_STAGES: Record<string, WorkflowStage[]> = {
-  pre_intake: ['pre_intake_review'],            // PreIntake → PreIntakeReview
-  pre_intake_review: ['pre_intake', 'intake'],  // Rejected → PreIntake, Approved → Intake
+  pre_intake_review: ['intake'],                // Approved → Intake (no reject)
   intake: ['content_review'],                   // Intake → ContentReview
   content_review: ['intake', 'infra_review'],   // Rejected → Intake, Approved → InfraReview
   infra_review: ['intake', 'env_setup', 'development'], // Rejected → Intake, Approved → EnvSetup or Development
@@ -689,20 +688,9 @@ export function WorkflowDetailPage() {
         {/* Unified Intake Tab - Same fields for all stages */}
         {activeTab === 0 && (
           <>
-            {summary.stage === 'pre_intake' && (
-              <Alert severity="info" style={{ marginBottom: 16 }}>
-                Your pre-intake request was sent back for updates. Please review the feedback in the <strong>Notes</strong> tab and make the necessary changes below.
-              </Alert>
-            )}
-
             {/* RHDP Published Content */}
             {wd?.deploymentMode === 'rhdp-published' && (
-              <InfoCard title={summary.stage === 'pre_intake' ? 'Update Pre-Intake Request' : 'Pre-Intake Request'}>
-                {summary.stage === 'pre_intake' && (
-                  <Typography variant="body2" color="textSecondary" style={{ marginBottom: 16 }}>
-                    Update your onboarding request based on reviewer feedback. All fields are editable.
-                  </Typography>
-                )}
+              <InfoCard title="Pre-Intake Request">
                 <Grid container spacing={2}>
                 <Grid item xs={12} md={6}>
                   <DetailField label="Project ID" value={summary.projectId} />

@@ -1,12 +1,9 @@
 import { WorkflowNode, WorkflowStage } from '../api/types';
 
 const STATE_MAP: Record<string, WorkflowStage> = {
-  preintake: 'pre_intake',
-  preintakeinitialcomplete: 'pre_intake',
-  preintakeawaitupdate: 'pre_intake',
   preintakereview: 'pre_intake_review',
   preintakereviewdecision: 'pre_intake_review',
-  createepic: 'pre_intake',
+  createepic: 'pre_intake_review',
   updateepic: 'pre_intake_review',
   createcatalog: 'pre_intake_review',
   waitforcatalog: 'pre_intake_review',
@@ -45,7 +42,6 @@ export function deriveStage(
 }
 
 export const STAGE_ORDER: WorkflowStage[] = [
-  'pre_intake',
   'pre_intake_review',
   'intake',
   'content_review',
@@ -59,7 +55,6 @@ export const STAGE_ORDER: WorkflowStage[] = [
 export const STAGE_LABELS: Record<WorkflowStage, string> = {
   init: 'Init',
   setup: 'Setup',
-  pre_intake: 'Pre-Intake',
   pre_intake_review: 'Pre-Intake Review',
   intake: 'Intake',
   review: 'Reviews',
@@ -74,8 +69,7 @@ export const STAGE_LABELS: Record<WorkflowStage, string> = {
 };
 
 export const STAGE_DESCRIPTIONS: Record<string, string> = {
-  pre_intake: 'Onboarding details submission. Completed on first run, active when updates are needed after rejection.',
-  pre_intake_review: 'Initial onboarding request is under review. Reviewer will approve, reject (send back for updates), or cancel (terminate).',
+  pre_intake_review: 'Initial onboarding request is under review. Reviewer can edit fields directly, then approve or cancel.',
   intake: 'The project spec, design document, and module outlines are being authored via the intake skill.',
   content_review: 'The design spec and module outlines are being reviewed for completeness and accuracy. A reviewer must approve or reject before proceeding.',
   infra_review: 'Infrastructure requirements (cluster type, sizing, workloads) are being reviewed. A reviewer must approve or reject before proceeding.',
