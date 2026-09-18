@@ -141,6 +141,7 @@ spec:
           output: |
             . + {
               createdAt: now(),
+              workflow_id: $WORKFLOW.instanceId,
               deploymentMode: .deploymentMode,
               ssoUser: .ssoUser,
               ssoEmail: .ssoEmail,
@@ -191,8 +192,8 @@ spec:
             functionRef:
               refName: createjiraepic
               arguments:
-                businessKey: .projectId
-                deploymentMode: .deploymentMode
+                workflow_id: .workflow_id
+                
             actionDataFilter:
               toStateData: .epicResponse
         stateDataFilter:
@@ -315,8 +316,8 @@ spec:
             functionRef:
               refName: updatejiraepic
               arguments:
-                businessKey: .projectId
-                deploymentMode: .deploymentMode
+                workflow_id: .workflow_id
+                
         transition:
           nextState: CreateCatalog
       - name: CreateCatalog
@@ -326,8 +327,8 @@ spec:
             functionRef:
               refName: createcatalog
               arguments:
-                project_id: .projectId
-                deploymentMode: .deploymentMode
+                workflow_id: .workflow_id
+                
                 repo_owner: "rhpds"
                 collaborators: (.teamMembers // [])
         transition:
@@ -494,8 +495,8 @@ spec:
             functionRef:
               refName: syncjiratasks
               arguments:
-                businessKey: .projectId
-                deploymentMode: .deploymentMode
+                workflow_id: .workflow_id
+                
                 status: "IntakeComplete"
             actionDataFilter:
               toStateData: .jiraSyncResponse
@@ -547,8 +548,8 @@ spec:
             functionRef:
               refName: syncjiratasks
               arguments:
-                businessKey: .projectId
-                deploymentMode: .deploymentMode
+                workflow_id: .workflow_id
+                
                 status: "EnvSetupComplete"
             actionDataFilter:
               toStateData: .jiraSyncResponse
@@ -592,8 +593,8 @@ spec:
             functionRef:
               refName: syncjiratasks
               arguments:
-                businessKey: .projectId
-                deploymentMode: .deploymentMode
+                workflow_id: .workflow_id
+                
                 status: "DevelopmentComplete"
             actionDataFilter:
               toStateData: .jiraSyncResponse
@@ -635,8 +636,8 @@ spec:
             functionRef:
               refName: syncjiratasks
               arguments:
-                businessKey: .projectId
-                deploymentMode: .deploymentMode
+                workflow_id: .workflow_id
+                
                 status: "TestingComplete"
             actionDataFilter:
               toStateData: .jiraSyncResponse

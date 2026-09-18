@@ -29,8 +29,7 @@ _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 
 class CreateEpicRequest(BaseModel):
-    businessKey: str  # Project ID used as workflow business key
-    deploymentMode: str  # Workflow type (rhdp-published, field-source, etc.)
+    workflow_id: str  # Workflow instance ID
 
 
 class CreateEpicResponse(BaseModel):
@@ -39,8 +38,7 @@ class CreateEpicResponse(BaseModel):
 
 
 class UpdateEpicRequest(BaseModel):
-    businessKey: str  # Project ID used as workflow business key
-    deploymentMode: str  # Workflow type (rhdp-published, field-source, etc.)
+    workflow_id: str  # Workflow instance ID
 
 
 class UpdateEpicResponse(BaseModel):
@@ -650,9 +648,13 @@ def create_epic(
     if not settings.jira_url:
         raise HTTPException(status_code=503, detail="Jira not configured")
 
-    # Query SonataFlow runtime API by business key (instant - no Data Index wait)
-    workflow_data = _get_workflow_data_by_business_key(body.businessKey, body.deploymentMode, settings)
-    workflow_type = body.deploymentMode  # Already in correct format (rhdp-published)
+    # Import here to avoid circular dependency
+    from .projects import _get_workflow_by_id
+
+    # Query Runtime API by workflow ID
+    workflow_instance = _get_workflow_by_id(body.workflow_id)
+    workflow_data = workflow_instance.get("workflowdata", {})
+    workflow_type = workflow_data.get("deploymentMode", "rhdp-published")
 
     # Format epic summary and description based on type
     if workflow_type in ("rhdp-published", "onboarded"):
@@ -721,9 +723,13 @@ def update_epic(
     if not settings.jira_url:
         raise HTTPException(status_code=503, detail="Jira not configured")
 
-    # Query SonataFlow runtime API by business key (instant - no Data Index wait)
-    workflow_data = _get_workflow_data_by_business_key(body.businessKey, body.deploymentMode, settings)
-    workflow_type = body.deploymentMode  # Already in correct format (rhdp-published)
+    # Import here to avoid circular dependency
+    from .projects import _get_workflow_by_id
+
+    # Query Runtime API by workflow ID
+    workflow_instance = _get_workflow_by_id(body.workflow_id)
+    workflow_data = workflow_instance.get("workflowdata", {})
+    workflow_type = workflow_data.get("deploymentMode", "rhdp-published")
 
     # Get epic_key from workflow data
     epic_key = workflow_data.get("epic_key", "")
@@ -938,8 +944,7 @@ def notify_reviewers_bg(epic_key: str, group_name: str, settings: Settings) -> N
 
 
 class SyncRequest(BaseModel):
-    businessKey: str
-    deploymentMode: str
+    workflow_id: str
     status: str = ""
 
 
@@ -1270,16 +1275,16 @@ async def sync_jira_tasks(
         raise HTTPException(status_code=503, detail="GitHub token not configured")
 
     # Import here to avoid circular dependency
-    from .projects import _get_workflow_from_runtime
+    from .projects import _get_workflow_by_id
 
     # Query Runtime API for workflow data
-    workflow_instance = _get_workflow_from_runtime(body.businessKey, body.deploymentMode)
+    workflow_instance = _get_workflow_by_id(body.workflow_id)
     # Runtime API returns workflowdata directly, not under variables
     wd = workflow_instance.get("workflowdata", {})
 
     repo_url = wd.get("repoUrl", "")
     epic_key = wd.get("epic_key", "")
-    slug = wd.get("projectId", body.businessKey)
+    slug = wd.get("projectId", "")
 
     if not repo_url:
         raise HTTPException(status_code=422, detail="Workflow has no repoUrl")

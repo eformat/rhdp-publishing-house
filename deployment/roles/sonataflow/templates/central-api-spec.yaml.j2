@@ -17,15 +17,11 @@ paths:
             schema:
               type: object
               required:
-                - businessKey
-                - deploymentMode
+                - workflow_id
               properties:
-                businessKey:
+                workflow_id:
                   type: string
-                  description: Project ID used as workflow business key
-                deploymentMode:
-                  type: string
-                  description: Workflow type (rhdp-published, field-source, etc.)
+                  description: Workflow instance ID
       responses:
         '200':
           description: Epic created successfully
@@ -53,15 +49,11 @@ paths:
             schema:
               type: object
               required:
-                - businessKey
-                - deploymentMode
+                - workflow_id
               properties:
-                businessKey:
+                workflow_id:
                   type: string
-                  description: Project ID used as workflow business key
-                deploymentMode:
-                  type: string
-                  description: Workflow type (rhdp-published, field-source, etc.)
+                  description: Workflow instance ID
       responses:
         '200':
           description: Epic updated successfully
@@ -76,17 +68,10 @@ paths:
                     type: boolean
       security:
         - bearerAuth: []
-  /projects/{project_id}/create-catalog:
+  /projects/create-catalog:
     post:
       operationId: createCatalog
       summary: Create GitHub repository from template, sync workflow metadata, and register Backstage catalog
-      parameters:
-        - name: project_id
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Project ID (businessKey)
       requestBody:
         required: true
         content:
@@ -94,11 +79,11 @@ paths:
             schema:
               type: object
               required:
-                - deploymentMode
+                - workflow_id
               properties:
-                deploymentMode:
+                workflow_id:
                   type: string
-                  description: Workflow type (rhdp-published, field-source, etc.)
+                  description: Workflow instance ID
                 repo_owner:
                   type: string
                   default: "rhpds"
@@ -138,15 +123,11 @@ paths:
             schema:
               type: object
               required:
-                - businessKey
-                - deploymentMode
+                - workflow_id
               properties:
-                businessKey:
+                workflow_id:
                   type: string
-                  description: Project ID used as workflow business key
-                deploymentMode:
-                  type: string
-                  description: Workflow type (rhdp-published, field-source, etc.)
+                  description: Workflow instance ID
                 status:
                   type: string
                   description: Stage completion status (IntakeComplete, EnvSetupComplete, etc.)

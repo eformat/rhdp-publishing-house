@@ -81,7 +81,7 @@ class PreIntakeUpdateRequest(BaseModel):
 
 
 class CreateCatalogRequest(BaseModel):
-    deploymentMode: str
+    workflow_id: str
     repo_owner: str = "rhpds"
     collaborators: list[dict] = []
 
@@ -288,43 +288,33 @@ def _get_workflow_by_business_key(business_key: str) -> str:
     return instances[0]["id"]
 
 
-def _get_workflow_from_runtime(business_key: str, deployment_mode: str):
-    """Query SonataFlow Runtime API for workflow instance by businessKey.
+def _get_workflow_by_id(workflow_id: str):
+    """Query SonataFlow Runtime API for workflow instance by ID.
 
-    Returns workflow instance data including variables.
+    Returns workflow instance data including workflowdata.
     Used by endpoints called from SonataFlow workflow.
     """
-    workflow_url = f"http://{deployment_mode}.publishing-house/{deployment_mode}?businessKey={business_key}"
-    logger.debug("_get_workflow_from_runtime: querying %s", workflow_url)
+    # Determine deployment mode from workflow data (all workflows use rhdp-published for now)
+    deployment_mode = "rhdp-published"
+
+    workflow_url = f"http://{deployment_mode}.publishing-house/{deployment_mode}/{workflow_id}"
+    logger.debug("_get_workflow_by_id: querying %s", workflow_url)
 
     req = urllib.request.Request(workflow_url, method="GET")
     try:
         with urllib.request.urlopen(req, context=_SSL_CTX, timeout=10) as r:
             result = json.loads(r.read().decode())
-        logger.debug("_get_workflow_from_runtime: response %s", result)
+        logger.debug("_get_workflow_by_id: got workflow %s", workflow_id)
 
         if not result:
-            raise HTTPException(status_code=404, detail=f"No workflow found for businessKey={business_key}")
-
-        # Runtime API returns a list of workflow instances
-        if isinstance(result, list):
-            if len(result) == 0:
-                raise HTTPException(status_code=404, detail=f"No workflow found for businessKey={business_key}")
-            # Find the workflow that actually matches the businessKey
-            for wf in result:
-                wf_data = wf.get("workflowdata", {})
-                if wf_data.get("projectId") == business_key or wf_data.get("projectid") == business_key:
-                    return wf
-            # Fallback: if no match found, log warning and return first (old behavior)
-            logger.warning("_get_workflow_from_runtime: businessKey=%s not found in results, returning first", business_key)
-            return result[0]
+            raise HTTPException(status_code=404, detail=f"No workflow found for id={workflow_id}")
 
         return result
     except urllib.error.HTTPError as e:
-        logger.error("_get_workflow_from_runtime: HTTP %s for %s", e.code, business_key)
-        raise HTTPException(status_code=404, detail=f"No workflow found for {business_key}")
+        logger.error("_get_workflow_by_id: HTTP %s for %s", e.code, workflow_id)
+        raise HTTPException(status_code=404, detail=f"No workflow found for {workflow_id}")
     except Exception as e:
-        logger.error("_get_workflow_from_runtime: error querying runtime API: %s", e)
+        logger.error("_get_workflow_by_id: error querying runtime API: %s", e)
         raise HTTPException(status_code=502, detail=f"Failed to query workflow: {e}")
 
 
@@ -1219,9 +1209,8 @@ async def submit_preintake_update(
 
 # ── Repository Creation ─────────────────────────────────────────────────────
 
-@router.post("/{project_id}/create-catalog", status_code=202)
+@router.post("/create-catalog", status_code=202)
 async def create_catalog(
-    project_id: str,
     body: CreateCatalogRequest,
     auth: tuple[str, int] = Depends(_require_auth),
 ):
@@ -1234,24 +1223,30 @@ async def create_catalog(
     settings = get_settings()
 
     # Start background task and return immediately
-    asyncio.create_task(_create_catalog_background(project_id, body, settings))
+    asyncio.create_task(_create_catalog_background(body, settings))
+
+    # Get project_id from workflow for response
+    workflow_instance = _get_workflow_by_id(body.workflow_id)
+    project_id = workflow_instance.get("workflowdata", {}).get("projectId", "")
+
     return {"status": "accepted", "project_id": project_id}
 
 
-async def _create_catalog_background(project_id: str, body: CreateCatalogRequest, settings):
+async def _create_catalog_background(body: CreateCatalogRequest, settings):
     """Background task for creating GitHub repo and registering catalog.
     Sends ph.catalog.created CloudEvent when complete."""
     try:
         if not settings.github_token:
-            logger.error("github: token not configured for %s", project_id)
+            logger.error("github: token not configured")
             return
 
         # Query Runtime API for workflow data
         try:
-            workflow_instance = _get_workflow_from_runtime(project_id, body.deploymentMode)
+            workflow_instance = _get_workflow_by_id(body.workflow_id)
             workflow_id = workflow_instance.get("id", "")
             # Runtime API returns workflowdata directly, not under variables
             wd = workflow_instance.get("workflowdata", {})
+            project_id = wd.get("projectId", "")
         except Exception as e:
             logger.error("catalog: failed to query workflow for %s: %s", project_id, e)
             return
