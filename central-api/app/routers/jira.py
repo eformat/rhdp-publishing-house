@@ -300,6 +300,9 @@ def _format_field_source_epic(fields: dict) -> tuple[str, dict]:
     # Environment Configuration
     content.append(_build_adf_heading(2, "Environment Configuration"))
     env_lines = [
+        _build_adf_text("Platform: ", strong=True),
+        _build_adf_text(fields.get("platform", "ocp")),
+        {"type": "hardBreak"},
         _build_adf_text("Cloud Provider: ", strong=True),
         _build_adf_text(fields.get("cloudProvider", "cnv"))
     ]
@@ -311,24 +314,35 @@ def _format_field_source_epic(fields: dict) -> tuple[str, dict]:
             _build_adf_text(fields["cloudProviderJustification"])
         ])
 
-    env_lines.extend([
-        {"type": "hardBreak"},
-        _build_adf_text("Cluster Type: ", strong=True),
-        _build_adf_text(fields.get("clusterType", "sno")),
-        {"type": "hardBreak"},
-        _build_adf_text("OCP Version: ", strong=True),
-        _build_adf_text(fields.get("ocpVersion", "4.21"))
-    ])
-
-    if fields.get("clusterType") == "multinode":
-        worker_count = fields.get("workerCount", 2)
-        worker_cpu = fields.get("workerCpu", 16)
-        worker_ram = fields.get("workerMemoryGb", 64)
+    # Add platform-specific fields
+    platform = fields.get("platform", "ocp")
+    if platform == "rhel-vms":
+        # RHEL-specific fields
         env_lines.extend([
             {"type": "hardBreak"},
-            _build_adf_text("Workers: ", strong=True),
-            _build_adf_text(f"{worker_count} x {worker_cpu} vCPU, {worker_ram} GB RAM")
+            _build_adf_text("RHEL Version: ", strong=True),
+            _build_adf_text(fields.get("rhelVersion", "9"))
         ])
+    else:
+        # OCP-specific fields
+        env_lines.extend([
+            {"type": "hardBreak"},
+            _build_adf_text("Cluster Type: ", strong=True),
+            _build_adf_text(fields.get("clusterType", "sno")),
+            {"type": "hardBreak"},
+            _build_adf_text("OCP Version: ", strong=True),
+            _build_adf_text(fields.get("ocpVersion", "4.21"))
+        ])
+
+        if fields.get("clusterType") == "multinode":
+            worker_count = fields.get("workerCount", 2)
+            worker_cpu = fields.get("workerCpu", 16)
+            worker_ram = fields.get("workerMemoryGb", 64)
+            env_lines.extend([
+                {"type": "hardBreak"},
+                _build_adf_text("Workers: ", strong=True),
+                _build_adf_text(f"{worker_count} x {worker_cpu} vCPU, {worker_ram} GB RAM")
+            ])
 
     content.append(_build_adf_paragraph(env_lines))
 

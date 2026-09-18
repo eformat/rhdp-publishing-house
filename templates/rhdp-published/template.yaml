@@ -197,25 +197,34 @@ spec:
     - title: Initiative & Technical Details
       required:
         - initiative_key
+        - platform
         - showroom_type
-        - automation_type
-        - cloud_provider
-        - cluster_type
-        - ocp_version
       properties:
         initiative_key:
           title: Initiative
           type: string
           enum:
+            - none
             - rh1_2027
             - summit_2027
-            - none
           enumNames:
+            - None
             - RH1 2027
             - Summit 2027
-            - None
-          default: rh1_2027
+          default: none
           ui:help: Which initiative is this content for?
+
+        platform:
+          title: What is your lab environment based on?
+          type: string
+          enum:
+            - openshift
+            - rhel
+          enumNames:
+            - OpenShift
+            - RHEL
+          default: openshift
+          ui:help: Choose the base platform for your lab environment
 
         showroom_type:
           title: Showroom Type
@@ -229,58 +238,67 @@ spec:
           default: classic
           ui:help: Classic = standard Showroom lab. Zero Touch = embedded runtime/setup automation.
 
-        automation_type:
-          title: Automation Type
-          type: string
-          enum:
-            - ansible
-            - gitops
-            - both
-          enumNames:
-            - Ansible
-            - GitOps
-            - Both (Ansible + GitOps)
-          default: ansible
-          ui:help: What type of automation will this project use?
+      dependencies:
+        platform:
+          oneOf:
+            - properties:
+                platform:
+                  const: rhel
+                rhel_version:
+                  title: RHEL Version
+                  type: string
+                  enum:
+                    - "8"
+                    - "9"
+                    - "10"
+                  enumNames:
+                    - "RHEL 8"
+                    - "RHEL 9"
+                    - "RHEL 10"
+                  default: "9"
+                  ui:help: Which RHEL version does your lab require?
+            - properties:
+                platform:
+                  const: openshift
+                ocp_version:
+                  title: OpenShift Version
+                  type: string
+                  enum:
+                    - "4.20"
+                    - "4.21"
+                    - "4.22"
+                  enumNames:
+                    - "4.20"
+                    - "4.21"
+                    - "4.22"
+                  default: "4.21"
+                  ui:help: Minimum OpenShift version required
 
-        cloud_provider:
-          title: Cloud Provider
-          type: string
-          enum:
-            - cnv
-            - aws
-            - azure
-          enumNames:
-            - CNV (Default)
-            - AWS
-            - Azure
-          default: cnv
-          ui:help: "Where will this run? Note: AWS is automatically selected for GPU workloads"
+                cloud_service:
+                  title: Do you need a cloud-managed OpenShift service?
+                  type: string
+                  enum:
+                    - none
+                    - rosa
+                    - aro
+                  enumNames:
+                    - "No - Use standard OpenShift on CNV"
+                    - "ROSA (Red Hat OpenShift Service on AWS)"
+                    - "ARO (Azure Red Hat OpenShift)"
+                  default: none
+                  ui:help: Cloud-managed services like ROSA or ARO require special justification
 
-        cluster_type:
-          title: Cluster Type
-          type: string
-          enum:
-            - sno
-            - multinode
-          enumNames:
-            - SNO (Single Node)
-            - Multinode
-          default: sno
-
-        ocp_version:
-          title: OCP Version
-          type: string
-          enum:
-            - "4.20"
-            - "4.21"
-            - "4.22"
-          enumNames:
-            - "4.20"
-            - "4.21"
-            - "4.22"
-          default: "4.21"
-          ui:help: Minimum OpenShift version
+                cluster_type:
+                  title: Cluster Type
+                  type: string
+                  enum:
+                    - sno
+                    - multinode
+                  enumNames:
+                    - SNO (Single Node)
+                    - Multinode
+                  default: sno
+                  ui:help: Single node for simple labs, multinode for production-like environments
 
   steps:
     # Step 1: Check if project name is already taken
@@ -318,10 +336,11 @@ spec:
           maasModels: ${{ (parameters.ai_related and parameters.can_use_maas and parameters.maas_models) or '' }}
           gpuJustification: ${{ (parameters.ai_related and not parameters.can_use_maas and parameters.gpu_justification) or '' }}
           partnersAccess: ${{ parameters.partners_access or false }}
-          cloudProvider: ${{ (parameters.ai_related and not parameters.can_use_maas) and 'aws' or parameters.cloud_provider }}
-          clusterType: ${{ parameters.cluster_type }}
-          ocpVersion: ${{ parameters.ocp_version }}
-          automationType: ${{ parameters.automation_type }}
+          platform: ${{ parameters.platform == 'openshift' and 'ocp' or 'rhel-vms' }}
+          cloudProvider: ${{ (parameters.ai_related and not parameters.can_use_maas) and 'aws' or (parameters.cloud_service if parameters.cloud_service != 'none' else 'cnv') }}
+          clusterType: ${{ parameters.cluster_type or 'sno' }}
+          ocpVersion: ${{ parameters.ocp_version or '4.21' }}
+          rhelVersion: ${{ parameters.rhel_version or '9' }}
           showroomType: ${{ parameters.showroom_type }}
           initiativeKey: ${{ parameters.initiative_key }}
           teamMembers: ${{ parameters.github_users }}

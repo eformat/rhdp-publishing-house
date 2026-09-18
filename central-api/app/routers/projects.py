@@ -109,12 +109,13 @@ class StartWorkflowRequest(BaseModel):
     maasModels: str = ""
     gpuJustification: str = ""
     partnersAccess: bool = False
+    platform: str = "ocp"
     cloudProvider: str = "cnv"
     clusterType: str = "sno"
     ocpVersion: str = "4.21"
-    automationType: str = "ansible"
+    rhelVersion: str = "9"
     showroomType: str = "classic"
-    initiativeKey: str = "rh1_2027"
+    initiativeKey: str = "none"
     teamMembers: list[dict] = []
     tags: list[str] = []
     intakeType: str = "new"
@@ -583,10 +584,11 @@ async def start_workflow(
         "maasModels": body.maasModels,
         "gpuJustification": body.gpuJustification,
         "partnersAccess": body.partnersAccess,
+        "platform": body.platform,
         "cloudProvider": body.cloudProvider,
         "clusterType": body.clusterType,
         "ocpVersion": body.ocpVersion,
-        "automationType": body.automationType,
+        "rhelVersion": body.rhelVersion,
         "showroomType": body.showroomType,
         "initiativeKey": body.initiativeKey,
         "teamMembers": body.teamMembers,
