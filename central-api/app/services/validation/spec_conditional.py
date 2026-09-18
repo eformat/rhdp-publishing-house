@@ -23,6 +23,7 @@ def run_checks(spec_data: dict, policy: dict) -> list[CheckResult]:
 
     if platform == "rhel-vms":
         vms = env.get("vms_per_student", [])
+        valid_rhel_versions = policy.get("valid_rhel_versions", ["8", "9", "10"])
         if not vms:
             results.append(CheckResult(
                 check_id="B-01", group="B", status=CheckStatus.FAIL,
@@ -31,21 +32,29 @@ def run_checks(spec_data: dict, policy: dict) -> list[CheckResult]:
             ))
         else:
             incomplete = []
+            invalid_versions = []
             for i, vm in enumerate(vms):
                 role = vm.get("role", f"vm-{i}")
-                missing = [f for f in ["cpu", "ram_gb"] if not vm.get(f)]
+                # Check required fields: cpu, ram_gb, version
+                missing = [f for f in ["cpu", "ram_gb", "version"] if not vm.get(f)]
                 if missing:
                     incomplete.append(f"{role}: missing {', '.join(missing)}")
-            if incomplete:
+                # Validate RHEL version
+                version = str(vm.get("version", ""))
+                if version and version not in valid_rhel_versions:
+                    invalid_versions.append(f"{role}: version '{version}' not in {valid_rhel_versions}")
+
+            errors = incomplete + invalid_versions
+            if errors:
                 results.append(CheckResult(
                     check_id="B-01", group="B", status=CheckStatus.FAIL,
-                    message=f"VM sizing incomplete: {'; '.join(incomplete)}",
+                    message=f"VM validation failed: {'; '.join(errors)}",
                     field="spec.environment.vms_per_student",
                 ))
             else:
                 results.append(CheckResult(
                     check_id="B-01", group="B", status=CheckStatus.PASS,
-                    message=f"{len(vms)} VM role(s) defined with sizing",
+                    message=f"{len(vms)} VM role(s) defined with sizing and version",
                     field="spec.environment.vms_per_student",
                 ))
     else:

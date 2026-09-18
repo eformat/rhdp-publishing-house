@@ -68,6 +68,7 @@ def run_checks(spec_data: dict, policy: dict) -> list[CheckResult]:
 
     # A-10: cluster_type — only required when platform = ocp
     cluster_type = env.get("cluster_type", "")
+    valid_cluster_types = policy.get("valid_cluster_types", ["sno", "multinode"])
     if platform == "rhel-vms":
         results.append(CheckResult(
             check_id="A-10", group="A", status=CheckStatus.SKIP,
@@ -80,18 +81,31 @@ def run_checks(spec_data: dict, policy: dict) -> list[CheckResult]:
             message="spec.environment.cluster_type is required for OCP labs",
             field="spec.environment.cluster_type",
         ))
+    elif cluster_type not in valid_cluster_types:
+        results.append(CheckResult(
+            check_id="A-10", group="A", status=CheckStatus.FAIL,
+            message=f"cluster_type '{cluster_type}' not in allowed list: {valid_cluster_types}",
+            field="spec.environment.cluster_type",
+        ))
     else:
         results.append(CheckResult(
             check_id="A-10", group="A", status=CheckStatus.PASS,
-            message=f"cluster_type is set",
+            message=f"cluster_type is set to {cluster_type}",
             field="spec.environment.cluster_type",
         ))
 
-    # A-11: platform — must be set
+    # A-11: platform — must be set and valid
+    valid_platforms = policy.get("valid_platforms", ["ocp", "rhel-vms"])
     if not platform:
         results.append(CheckResult(
             check_id="A-11", group="A", status=CheckStatus.FAIL,
-            message="spec.environment.platform is required (ocp or rhel-vms)",
+            message=f"spec.environment.platform is required ({', '.join(valid_platforms)})",
+            field="spec.environment.platform",
+        ))
+    elif platform not in valid_platforms:
+        results.append(CheckResult(
+            check_id="A-11", group="A", status=CheckStatus.FAIL,
+            message=f"platform '{platform}' not in allowed list: {valid_platforms}",
             field="spec.environment.platform",
         ))
     else:

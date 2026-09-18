@@ -15,6 +15,9 @@ _FALLBACK_POLICY = {
     "valid_audiences": ["beginner", "intermediate", "advanced"],
     "valid_topologies": ["shared-cluster", "per-student", "cnv-pool"],
     "valid_showroom_types": ["showroom", "instructions"],
+    "valid_platforms": ["ocp", "rhel-vms"],
+    "valid_cluster_types": ["sno", "multinode"],
+    "valid_rhel_versions": ["8", "9", "10"],
     "action_verbs_valid": [
         "configure", "deploy", "create", "implement", "troubleshoot",
         "monitor", "scale", "install", "build", "integrate", "automate",
