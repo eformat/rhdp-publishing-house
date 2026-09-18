@@ -314,10 +314,10 @@ spec:
           associatedOpportunities: ${{ parameters.associated_opportunities }}
           salesPlayTdp: ${{ parameters.sales_play_tdp }}
           aiRelated: ${{ parameters.ai_related }}
-          canUseMaas: ${{ parameters.can_use_maas }}
-          maasModels: ${{ parameters.maas_models }}
-          gpuJustification: ${{ parameters.gpu_justification }}
-          partnersAccess: ${{ parameters.partners_access }}
+          canUseMaas: ${{ parameters.ai_related and parameters.can_use_maas }}
+          maasModels: ${{ parameters.ai_related and parameters.can_use_maas and parameters.maas_models }}
+          gpuJustification: ${{ parameters.ai_related and not parameters.can_use_maas and parameters.gpu_justification }}
+          partnersAccess: ${{ parameters.partners_access or false }}
           cloudProvider: ${{ parameters.cloud_provider }}
           clusterType: ${{ parameters.cluster_type }}
           ocpVersion: ${{ parameters.ocp_version }}
