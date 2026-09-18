@@ -118,7 +118,7 @@ spec:
                           ui:widget: textarea
                           ui:options:
                             rows: 2
-                          ui:help: List the model(s) you need. See available models at https://maas-rhdp.apps.maas.redhatworkshops.io/models
+                          ui:help: List the model(s) you need. See available models at https://maas-rhdp-frontend.apps.maas.redhatworkshops.io/models
                           ui:placeholder: "e.g., gpt-4o, claude-3-5-sonnet"
                         partners_access:
                           title: Should it be available to Partners?
