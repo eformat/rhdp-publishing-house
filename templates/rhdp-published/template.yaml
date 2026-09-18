@@ -86,18 +86,17 @@ spec:
           type: boolean
           default: false
 
-        partners_access:
-          title: Should it be available to Partners?
-          type: boolean
-          default: false
-          ui:help: Check if this content should be accessible to Red Hat partners
-
       dependencies:
         ai_related:
           oneOf:
             - properties:
                 ai_related:
                   const: false
+                partners_access:
+                  title: Should it be available to Partners?
+                  type: boolean
+                  default: false
+                  ui:help: Check if this content should be accessible to Red Hat partners
             - properties:
                 ai_related:
                   const: true
@@ -106,6 +105,11 @@ spec:
                   type: boolean
                   default: true
                   ui:help: Model-as-a-Service provides API access to AI models without requiring direct GPU hardware
+                partners_access:
+                  title: Should it be available to Partners?
+                  type: boolean
+                  default: false
+                  ui:help: Check if this content should be accessible to Red Hat partners
               dependencies:
                 can_use_maas:
                   oneOf:
