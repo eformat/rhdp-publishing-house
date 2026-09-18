@@ -1075,7 +1075,7 @@ def _send_cloud_event(event_type: str, workflow_id: str, data: dict):
 
 # ── Pre-Intake Review ──────────────────────────────────────────────────────
 
-@router.post("/{workflow_id}/preintake")
+@router.post("/{workflow_id}/preintake-review")
 async def preintake_review(
     workflow_id: str,
     body: PreIntakeRequest,
