@@ -151,7 +151,6 @@ spec:
         project_name:
           title: GitHub Repository Name
           type: string
-          description: Choose a meaningful and unique name for your GitHub repository
           ui:placeholder: "openshift-ai-workshop"
           pattern: '^[a-z0-9-]+$'
           ui:help: "Choose a meaningful and unique name. The prefix 'ph-' will be automatically prepended (don't add it yourself). Use lowercase letters, numbers, and hyphens only."
